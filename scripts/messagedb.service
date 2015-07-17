@@ -1,0 +1,16 @@
+# If you modify this, please also make sure to edit init.sh
+
+[Unit]
+Description=MessageDB is an open-source, distributed, messaging database
+After=network.target
+
+[Service]
+User=messagedb
+Group=messagedb
+LimitNOFILE=65536
+EnvironmentFile=-/etc/default/messagedb
+ExecStart=/opt/messagedb/messaged -config /etc/opt/messagedb/messagedb.conf $MESSAGED_OPTS
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

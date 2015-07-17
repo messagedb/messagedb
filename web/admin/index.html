@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="">
+    <meta name="author" content="">
+
+    <title>MessageDB - The Messaging Database</title>
+
+    <!-- Bootstrap Core CSS -->
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/font-awesome.min.css" rel="stylesheet">
+    <link href="css/admin.css" rel="stylesheet">
+
+</head>
+
+<body>
+    <div id="wrap">
+        <!-- Navigation -->
+        <nav class="navbar navbar-fixed-top" role="navigation">
+            <div class="container">
+                <!-- Brand and toggle get grouped for better mobile display -->
+                <div class="navbar-header">
+                    <a class="navbar-brand" href="#">
+                        <img src="img/messagedb-logo.png" style="height:28px; margin-top:-4px;" />
+                    </a>
+                </div>
+                <!-- Collect the nav links, forms, and other content for toggling -->
+                <div class="collapse navbar-collapse" id="bs-example-navbar-collapse-1">
+                    <ul class="nav navbar-nav">
+                        <li>
+                            <a href="#" data-toggle="modal" data-target="#myModal">Write Data</a>
+                        </li>
+                    </ul>
+
+
+                    <ul class="nav navbar-nav navbar-right">
+                        <li class="dropdown">
+                            <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">
+                                <span>Database:</span> <span id="content-current-database">&hellip;</span> <span class="caret"></span>
+                            </a>
+                            <ul class="dropdown-menu" id="content-database-list">
+                                <!-- Available databases will go here -->
+                            </ul>
+                        </li>
+
+                        <li>
+                            <a href="#" id="action-settings"><i class="fa fa-cog"></i></a>
+                        </li>
+                    </ul>
+                </div>
+                <!-- /.navbar-collapse -->
+
+            </div>
+            <!-- /.container -->
+        </nav>
+
+
+        <!-- Page Content -->
+        <div class="container">
+
+            <div id="push"></div>
+        </div>
+    </div>
+
+    <!-- /.container -->
+    <div id="footer">
+      <div class="container">
+          <p class="text-muted text-right credit"><b>MessageDB</b> v0.1.0</p>
+      </div>
+    </div>
+
+    <script src="js/vendor/react-0.13.3.min.js"></script>
+    <script src="js/vendor/jquery-2.1.4.min.js"></script>
+    <script src="js/vendor/bootstrap-3.3.5.min.js"></script>
+</body>
+
+</html>

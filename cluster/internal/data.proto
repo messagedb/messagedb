@@ -1,0 +1,34 @@
+package internal;
+
+message WriteShardRequest {
+    required uint64 ShardID = 1;
+    repeated Message Messages = 2;
+}
+
+message From {
+    required string UserID = 1;
+    required string Name = 2;
+}
+
+message Content {
+    required string PlainText = 1;
+    optional string HTML = 2;
+}
+
+message Mention {
+    required string RecipientID = 1;
+    required string RecipientUsername = 2;
+}
+
+message Message {
+	optional string Id = 1;
+    required int64 Time = 2;
+    optional From From = 3;
+    optional Content Content = 4;
+    optional Mention Mentions = 5;
+}
+
+message WriteShardResponse {
+    required int32 Code = 1;
+    optional string Message = 2;
+}

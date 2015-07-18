@@ -52,11 +52,6 @@ message ShardInfo {
 	required uint64 ID = 1;
 	repeated uint64 OwnerIDs = 2;
 }
-//
-// message ContinuousQueryInfo {
-// 	required string Name = 1;
-// 	required string Query = 2;
-// }
 
 message UserInfo {
 	required string Name = 1;
@@ -91,13 +86,33 @@ message Command {
 		UpdateRetentionPolicyCommand     = 8;
 		CreateShardGroupCommand          = 9;
 		DeleteShardGroupCommand          = 10;
-		// CreateContinuousQueryCommand     = 11;
-		// DropContinuousQueryCommand       = 12;
+
+		SetPrivilegeCommand              = 14;
+		SetDataCommand                   = 15;
+
 		CreateUserCommand                = 11;
 		DropUserCommand                  = 12;
 		UpdateUserCommand                = 13;
-		SetPrivilegeCommand              = 14;
-		SetDataCommand                   = 15;
+
+		CreateOrganizationCommand        = 15;
+		DropOrganizationCommand          = 15;
+		UpdateOrganizationCommand        = 15;
+
+		AddOrUpdateMembershipCommand	 = 15;
+		RemoveMembershipCommand 		 = 15;
+		EditMyMembershipCommand          = 15;
+
+		CreateConversationCommand        = 15;
+		DropConversationCommand          = 15;
+		UpdateConversationCommand        = 15;
+
+		PublicizeMembershipCommand		 = 15;
+		ConcealMembershipCommand		 = 15;
+
+		AddDeviceCommand				 = 15;
+		UpdateDeviceCommand				 = 15;
+		DeleteDeviceCommand				 = 15;
+
     }
 
     required Type type = 1;
@@ -184,23 +199,6 @@ message DeleteShardGroupCommand {
     required string Policy = 2;
     required uint64 ShardGroupID = 3;
 }
-
-// message CreateContinuousQueryCommand {
-//     extend Command {
-//         optional CreateContinuousQueryCommand command = 111;
-//     }
-//     required string Database = 1;
-//     required string Name = 2;
-//     required string Query = 3;
-// }
-//
-// message DropContinuousQueryCommand {
-//     extend Command {
-//         optional DropContinuousQueryCommand command = 112;
-//     }
-//     required string Database = 1;
-//     required string Name = 2;
-// }
 
 message CreateUserCommand {
     extend Command {

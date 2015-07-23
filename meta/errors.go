@@ -13,7 +13,7 @@ var (
 	ErrStoreClosed = errors.New("raft store already closed")
 
 	// ErrTooManyPeers is returned when more than 3 peers are used.
-	ErrTooManyPeers = errors.New("too many peers; messagedb v0.9.0 is limited to 3 nodes in a cluster")
+	ErrTooManyPeers = errors.New("too many peers; messagedb v0.1.0 is limited to 3 nodes in a cluster")
 )
 
 var (
@@ -112,19 +112,4 @@ func lookupError(err error) error {
 		return e
 	}
 	return err
-}
-
-// AuthError represents an authorization error.
-type AuthError struct {
-	text string
-}
-
-// NewAuthError returns a new instance of AuthError.
-func NewAuthError(text string) AuthError {
-	return AuthError{text: text}
-}
-
-// Error returns the text of the error.
-func (e AuthError) Error() string {
-	return e.text
 }

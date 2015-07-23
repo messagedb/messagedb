@@ -3,7 +3,7 @@ package meta
 import (
 	"fmt"
 
-	"github.com/messagedb/messagedb/messageql"
+	"github.com/messagedb/messagedb/sql"
 )
 
 // StatementExecutor translates InfluxQL queries to meta store methods.
@@ -26,8 +26,10 @@ type StatementExecutor struct {
 		CreateUser(name, password string, admin bool) (*UserInfo, error)
 		UpdateUser(name, password string) error
 		DropUser(name string) error
-		SetPrivilege(username, database string, p messageql.Privilege) error
-		UserPrivileges(username string) (map[string]messageql.Privilege, error)
+		SetPrivilege(username, database string, p sql.Privilege) error
+		SetAdminPrivilege(username string, admin bool) error
+		UserPrivileges(username string) (map[string]sql.Privilege, error)
+		UserPrivilege(username, database string) (*sql.Privilege, error)
 
 		// CreateContinuousQuery(database, name, query string) error
 		// DropContinuousQuery(database, name string) error
@@ -35,133 +37,152 @@ type StatementExecutor struct {
 }
 
 // ExecuteStatement executes stmt against the meta store as user.
-func (e *StatementExecutor) ExecuteStatement(stmt messageql.Statement) *messageql.Result {
+func (e *StatementExecutor) ExecuteStatement(stmt sql.Statement) *sql.Result {
 	switch stmt := stmt.(type) {
-	case *messageql.CreateDatabaseStatement:
+	case *sql.CreateDatabaseStatement:
 		return e.executeCreateDatabaseStatement(stmt)
-	case *messageql.DropDatabaseStatement:
+	case *sql.DropDatabaseStatement:
 		return e.executeDropDatabaseStatement(stmt)
-	case *messageql.ShowDatabasesStatement:
+	case *sql.ShowDatabasesStatement:
 		return e.executeShowDatabasesStatement(stmt)
-	case *messageql.ShowGrantsForUserStatement:
+	case *sql.ShowGrantsForUserStatement:
 		return e.executeShowGrantsForUserStatement(stmt)
-	case *messageql.ShowServersStatement:
+	case *sql.ShowServersStatement:
 		return e.executeShowServersStatement(stmt)
-	case *messageql.CreateUserStatement:
+	case *sql.CreateUserStatement:
 		return e.executeCreateUserStatement(stmt)
-	case *messageql.SetPasswordUserStatement:
+	case *sql.SetPasswordUserStatement:
 		return e.executeSetPasswordUserStatement(stmt)
-	case *messageql.DropUserStatement:
+	case *sql.DropUserStatement:
 		return e.executeDropUserStatement(stmt)
-	case *messageql.ShowUsersStatement:
+	case *sql.ShowUsersStatement:
 		return e.executeShowUsersStatement(stmt)
-	case *messageql.GrantStatement:
+	case *sql.GrantStatement:
 		return e.executeGrantStatement(stmt)
-	case *messageql.RevokeStatement:
+	case *sql.GrantAdminStatement:
+		return e.executeGrantAdminStatement(stmt)
+	case *sql.RevokeStatement:
 		return e.executeRevokeStatement(stmt)
-	case *messageql.CreateRetentionPolicyStatement:
+	case *sql.RevokeAdminStatement:
+		return e.executeRevokeAdminStatement(stmt)
+	case *sql.CreateRetentionPolicyStatement:
 		return e.executeCreateRetentionPolicyStatement(stmt)
-	case *messageql.AlterRetentionPolicyStatement:
+	case *sql.AlterRetentionPolicyStatement:
 		return e.executeAlterRetentionPolicyStatement(stmt)
-	case *messageql.DropRetentionPolicyStatement:
+	case *sql.DropRetentionPolicyStatement:
 		return e.executeDropRetentionPolicyStatement(stmt)
-	case *messageql.ShowRetentionPoliciesStatement:
+	case *sql.ShowRetentionPoliciesStatement:
 		return e.executeShowRetentionPoliciesStatement(stmt)
-	case *messageql.ShowStatsStatement:
+	case *sql.ShowStatsStatement:
 		return e.executeShowStatsStatement(stmt)
 	default:
 		panic(fmt.Sprintf("unsupported statement type: %T", stmt))
 	}
 }
 
-func (e *StatementExecutor) executeCreateDatabaseStatement(q *messageql.CreateDatabaseStatement) *messageql.Result {
+func (e *StatementExecutor) executeCreateDatabaseStatement(q *sql.CreateDatabaseStatement) *sql.Result {
 	_, err := e.Store.CreateDatabase(q.Name)
-	return &messageql.Result{Err: err}
+	return &sql.Result{Err: err}
 }
 
-func (e *StatementExecutor) executeDropDatabaseStatement(q *messageql.DropDatabaseStatement) *messageql.Result {
-	return &messageql.Result{Err: e.Store.DropDatabase(q.Name)}
+func (e *StatementExecutor) executeDropDatabaseStatement(q *sql.DropDatabaseStatement) *sql.Result {
+	return &sql.Result{Err: e.Store.DropDatabase(q.Name)}
 }
 
-func (e *StatementExecutor) executeShowDatabasesStatement(q *messageql.ShowDatabasesStatement) *messageql.Result {
+func (e *StatementExecutor) executeShowDatabasesStatement(q *sql.ShowDatabasesStatement) *sql.Result {
 	dis, err := e.Store.Databases()
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
-	row := &messageql.Row{Name: "databases", Columns: []string{"name"}}
+	row := &sql.Row{Name: "databases", Columns: []string{"name"}}
 	for _, di := range dis {
 		row.Values = append(row.Values, []interface{}{di.Name})
 	}
-	return &messageql.Result{Rows: []*messageql.Row{row}}
+	return &sql.Result{Rows: []*sql.Row{row}}
 }
 
-func (e *StatementExecutor) executeShowGrantsForUserStatement(q *messageql.ShowGrantsForUserStatement) *messageql.Result {
+func (e *StatementExecutor) executeShowGrantsForUserStatement(q *sql.ShowGrantsForUserStatement) *sql.Result {
 	priv, err := e.Store.UserPrivileges(q.Name)
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
-	row := &messageql.Row{Columns: []string{"database", "privilege"}}
+	row := &sql.Row{Columns: []string{"database", "privilege"}}
 	for d, p := range priv {
 		row.Values = append(row.Values, []interface{}{d, p.String()})
 	}
-	return &messageql.Result{Rows: []*messageql.Row{row}}
+	return &sql.Result{Rows: []*sql.Row{row}}
 }
 
-func (e *StatementExecutor) executeShowServersStatement(q *messageql.ShowServersStatement) *messageql.Result {
+func (e *StatementExecutor) executeShowServersStatement(q *sql.ShowServersStatement) *sql.Result {
 	nis, err := e.Store.Nodes()
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
-	row := &messageql.Row{Columns: []string{"id", "url"}}
+	row := &sql.Row{Columns: []string{"id", "url"}}
 	for _, ni := range nis {
 		row.Values = append(row.Values, []interface{}{ni.ID, "http://" + ni.Host})
 	}
-	return &messageql.Result{Rows: []*messageql.Row{row}}
+	return &sql.Result{Rows: []*sql.Row{row}}
 }
 
-func (e *StatementExecutor) executeCreateUserStatement(q *messageql.CreateUserStatement) *messageql.Result {
-	admin := false
-	if q.Privilege != nil {
-		admin = (*q.Privilege == messageql.AllPrivileges)
-	}
-
-	_, err := e.Store.CreateUser(q.Name, q.Password, admin)
-	return &messageql.Result{Err: err}
+func (e *StatementExecutor) executeCreateUserStatement(q *sql.CreateUserStatement) *sql.Result {
+	_, err := e.Store.CreateUser(q.Name, q.Password, q.Admin)
+	return &sql.Result{Err: err}
 }
 
-func (e *StatementExecutor) executeSetPasswordUserStatement(q *messageql.SetPasswordUserStatement) *messageql.Result {
-	return &messageql.Result{Err: e.Store.UpdateUser(q.Name, q.Password)}
+func (e *StatementExecutor) executeSetPasswordUserStatement(q *sql.SetPasswordUserStatement) *sql.Result {
+	return &sql.Result{Err: e.Store.UpdateUser(q.Name, q.Password)}
 }
 
-func (e *StatementExecutor) executeDropUserStatement(q *messageql.DropUserStatement) *messageql.Result {
-	return &messageql.Result{Err: e.Store.DropUser(q.Name)}
+func (e *StatementExecutor) executeDropUserStatement(q *sql.DropUserStatement) *sql.Result {
+	return &sql.Result{Err: e.Store.DropUser(q.Name)}
 }
 
-func (e *StatementExecutor) executeShowUsersStatement(q *messageql.ShowUsersStatement) *messageql.Result {
+func (e *StatementExecutor) executeShowUsersStatement(q *sql.ShowUsersStatement) *sql.Result {
 	uis, err := e.Store.Users()
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
-	row := &messageql.Row{Columns: []string{"user", "admin"}}
+	row := &sql.Row{Columns: []string{"user", "admin"}}
 	for _, ui := range uis {
 		row.Values = append(row.Values, []interface{}{ui.Name, ui.Admin})
 	}
-	return &messageql.Result{Rows: []*messageql.Row{row}}
+	return &sql.Result{Rows: []*sql.Row{row}}
 }
 
-func (e *StatementExecutor) executeGrantStatement(stmt *messageql.GrantStatement) *messageql.Result {
-	return &messageql.Result{Err: e.Store.SetPrivilege(stmt.User, stmt.On, stmt.Privilege)}
+func (e *StatementExecutor) executeGrantStatement(stmt *sql.GrantStatement) *sql.Result {
+	return &sql.Result{Err: e.Store.SetPrivilege(stmt.User, stmt.On, stmt.Privilege)}
 }
 
-func (e *StatementExecutor) executeRevokeStatement(stmt *messageql.RevokeStatement) *messageql.Result {
-	return &messageql.Result{Err: e.Store.SetPrivilege(stmt.User, stmt.On, messageql.NoPrivileges)}
+func (e *StatementExecutor) executeGrantAdminStatement(stmt *sql.GrantAdminStatement) *sql.Result {
+	return &sql.Result{Err: e.Store.SetAdminPrivilege(stmt.User, true)}
 }
 
-func (e *StatementExecutor) executeCreateRetentionPolicyStatement(stmt *messageql.CreateRetentionPolicyStatement) *messageql.Result {
+func (e *StatementExecutor) executeRevokeStatement(stmt *sql.RevokeStatement) *sql.Result {
+	priv := sql.NoPrivileges
+
+	// Revoking all privileges means there's no need to look at existing user privileges.
+	if stmt.Privilege != sql.AllPrivileges {
+		p, err := e.Store.UserPrivilege(stmt.User, stmt.On)
+		if err != nil {
+			return &sql.Result{Err: err}
+		}
+		// Bit clear (AND NOT) the user's privilege with the revoked privilege.
+		priv = *p &^ stmt.Privilege
+	}
+
+	return &sql.Result{Err: e.Store.SetPrivilege(stmt.User, stmt.On, priv)}
+}
+
+func (e *StatementExecutor) executeRevokeAdminStatement(stmt *sql.RevokeAdminStatement) *sql.Result {
+	return &sql.Result{Err: e.Store.SetAdminPrivilege(stmt.User, false)}
+}
+
+func (e *StatementExecutor) executeCreateRetentionPolicyStatement(stmt *sql.CreateRetentionPolicyStatement) *sql.Result {
 	rpi := NewRetentionPolicyInfo(stmt.Name)
 	rpi.Duration = stmt.Duration
 	rpi.ReplicaN = stmt.Replication
@@ -169,7 +190,7 @@ func (e *StatementExecutor) executeCreateRetentionPolicyStatement(stmt *messageq
 	// Create new retention policy.
 	_, err := e.Store.CreateRetentionPolicy(stmt.Database, rpi)
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
 	// If requested, set new policy as the default.
@@ -177,10 +198,10 @@ func (e *StatementExecutor) executeCreateRetentionPolicyStatement(stmt *messageq
 		err = e.Store.SetDefaultRetentionPolicy(stmt.Database, stmt.Name)
 	}
 
-	return &messageql.Result{Err: err}
+	return &sql.Result{Err: err}
 }
 
-func (e *StatementExecutor) executeAlterRetentionPolicyStatement(stmt *messageql.AlterRetentionPolicyStatement) *messageql.Result {
+func (e *StatementExecutor) executeAlterRetentionPolicyStatement(stmt *sql.AlterRetentionPolicyStatement) *sql.Result {
 	rpu := &RetentionPolicyUpdate{
 		Duration: stmt.Duration,
 		ReplicaN: stmt.Replication,
@@ -189,7 +210,7 @@ func (e *StatementExecutor) executeAlterRetentionPolicyStatement(stmt *messageql
 	// Update the retention policy.
 	err := e.Store.UpdateRetentionPolicy(stmt.Database, stmt.Name, rpu)
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
 	// If requested, set as default retention policy.
@@ -197,28 +218,28 @@ func (e *StatementExecutor) executeAlterRetentionPolicyStatement(stmt *messageql
 		err = e.Store.SetDefaultRetentionPolicy(stmt.Database, stmt.Name)
 	}
 
-	return &messageql.Result{Err: err}
+	return &sql.Result{Err: err}
 }
 
-func (e *StatementExecutor) executeDropRetentionPolicyStatement(q *messageql.DropRetentionPolicyStatement) *messageql.Result {
-	return &messageql.Result{Err: e.Store.DropRetentionPolicy(q.Database, q.Name)}
+func (e *StatementExecutor) executeDropRetentionPolicyStatement(q *sql.DropRetentionPolicyStatement) *sql.Result {
+	return &sql.Result{Err: e.Store.DropRetentionPolicy(q.Database, q.Name)}
 }
 
-func (e *StatementExecutor) executeShowRetentionPoliciesStatement(q *messageql.ShowRetentionPoliciesStatement) *messageql.Result {
+func (e *StatementExecutor) executeShowRetentionPoliciesStatement(q *sql.ShowRetentionPoliciesStatement) *sql.Result {
 	di, err := e.Store.Database(q.Database)
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	} else if di == nil {
-		return &messageql.Result{Err: ErrDatabaseNotFound}
+		return &sql.Result{Err: ErrDatabaseNotFound}
 	}
 
-	row := &messageql.Row{Columns: []string{"name", "duration", "replicaN", "default"}}
+	row := &sql.Row{Columns: []string{"name", "duration", "replicaN", "default"}}
 	for _, rpi := range di.RetentionPolicies {
 		row.Values = append(row.Values, []interface{}{rpi.Name, rpi.Duration.String(), rpi.ReplicaN, di.DefaultRetentionPolicy == rpi.Name})
 	}
-	return &messageql.Result{Rows: []*messageql.Row{row}}
+	return &sql.Result{Rows: []*sql.Row{row}}
 }
 
-func (e *StatementExecutor) executeShowStatsStatement(stmt *messageql.ShowStatsStatement) *messageql.Result {
-	return &messageql.Result{Err: fmt.Errorf("SHOW STATS is not implemented yet")}
+func (e *StatementExecutor) executeShowStatsStatement(stmt *sql.ShowStatsStatement) *sql.Result {
+	return &sql.Result{Err: fmt.Errorf("SHOW STATS is not implemented yet")}
 }

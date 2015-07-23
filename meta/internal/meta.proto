@@ -87,32 +87,33 @@ message Command {
 		CreateShardGroupCommand          = 9;
 		DeleteShardGroupCommand          = 10;
 
-		SetPrivilegeCommand              = 14;
-		SetDataCommand                   = 15;
+		SetPrivilegeCommand              = 11;
+		SetDataCommand                   = 12;
 
-		CreateUserCommand                = 11;
-		DropUserCommand                  = 12;
-		UpdateUserCommand                = 13;
+		CreateUserCommand                = 13;
+		DropUserCommand                  = 14;
+		UpdateUserCommand                = 15;
 
-		CreateOrganizationCommand        = 15;
-		DropOrganizationCommand          = 15;
-		UpdateOrganizationCommand        = 15;
+		CreateOrganizationCommand        = 16;
+		DropOrganizationCommand          = 17;
+		UpdateOrganizationCommand        = 18;
 
-		AddOrUpdateMembershipCommand	 = 15;
-		RemoveMembershipCommand 		 = 15;
-		EditMyMembershipCommand          = 15;
+		AddOrUpdateMembershipCommand	 = 19;
+		RemoveMembershipCommand 		 = 20;
+		EditMyMembershipCommand          = 21;
 
-		CreateConversationCommand        = 15;
-		DropConversationCommand          = 15;
-		UpdateConversationCommand        = 15;
+		CreateConversationCommand        = 22;
+		DropConversationCommand          = 23;
+		UpdateConversationCommand        = 24;
 
-		PublicizeMembershipCommand		 = 15;
-		ConcealMembershipCommand		 = 15;
+		PublicizeMembershipCommand		 = 25;
+		ConcealMembershipCommand		 = 26;
 
-		AddDeviceCommand				 = 15;
-		UpdateDeviceCommand				 = 15;
-		DeleteDeviceCommand				 = 15;
+		AddDeviceCommand				 = 27;
+		UpdateDeviceCommand				 = 28;
+		DeleteDeviceCommand				 = 29;
 
+		SetAdminPrivilegeCommand         = 30;
     }
 
     required Type type = 1;
@@ -202,7 +203,7 @@ message DeleteShardGroupCommand {
 
 message CreateUserCommand {
     extend Command {
-        optional CreateUserCommand command = 113;
+        optional CreateUserCommand command = 111;
     }
     required string Name = 1;
     required string Hash = 2;
@@ -211,14 +212,14 @@ message CreateUserCommand {
 
 message DropUserCommand {
     extend Command {
-        optional DropUserCommand command = 114;
+        optional DropUserCommand command = 112;
     }
     required string Name = 1;
 }
 
 message UpdateUserCommand {
     extend Command {
-        optional UpdateUserCommand command = 115;
+        optional UpdateUserCommand command = 113;
     }
     required string Name = 1;
     required string Hash = 2;
@@ -226,7 +227,7 @@ message UpdateUserCommand {
 
 message SetPrivilegeCommand {
     extend Command {
-        optional SetPrivilegeCommand command = 116;
+        optional SetPrivilegeCommand command = 114;
     }
     required string Username = 1;
     required string Database = 2;
@@ -235,9 +236,17 @@ message SetPrivilegeCommand {
 
 message SetDataCommand {
     extend Command {
-        optional SetDataCommand command = 117;
+        optional SetDataCommand command = 115;
     }
     required Data Data = 1;
+}
+
+message SetAdminPrivilegeCommand {
+    extend Command {
+        optional SetAdminPrivilegeCommand command = 116;
+    }
+    required string Username = 1;
+    required bool Admin = 2;
 }
 
 message Response {

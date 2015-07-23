@@ -5,8 +5,8 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/messagedb/messagedb/messageql"
 	"github.com/messagedb/messagedb/meta/internal"
+	"github.com/messagedb/messagedb/sql"
 )
 
 //go:generate protoc --gogo_out=. internal/meta.proto
@@ -427,28 +427,56 @@ func (data *Data) UpdateUser(name, hash string) error {
 }
 
 // SetPrivilege sets a privilege for a user on a database.
-func (data *Data) SetPrivilege(name, database string, p messageql.Privilege) error {
+func (data *Data) SetPrivilege(name, database string, p sql.Privilege) error {
 	ui := data.User(name)
 	if ui == nil {
 		return ErrUserNotFound
 	}
 
 	if ui.Privileges == nil {
-		ui.Privileges = make(map[string]messageql.Privilege)
+		ui.Privileges = make(map[string]sql.Privilege)
 	}
 	ui.Privileges[database] = p
 
 	return nil
 }
 
-// UserPrivileges get privileges for a user.
-func (data *Data) UserPrivileges(name string) (map[string]messageql.Privilege, error) {
+// SetAdminPrivilege sets the admin privilege for a user.
+func (data *Data) SetAdminPrivilege(name string, admin bool) error {
+	ui := data.User(name)
+	if ui == nil {
+		return ErrUserNotFound
+	}
+
+	ui.Admin = admin
+
+	return nil
+}
+
+// UserPrivileges gets the privileges for a user.
+func (data *Data) UserPrivileges(name string) (map[string]sql.Privilege, error) {
 	ui := data.User(name)
 	if ui == nil {
 		return nil, ErrUserNotFound
 	}
 
 	return ui.Privileges, nil
+}
+
+// UserPrivilege gets the privilege for a user on a database.
+func (data *Data) UserPrivilege(name, database string) (*sql.Privilege, error) {
+	ui := data.User(name)
+	if ui == nil {
+		return nil, ErrUserNotFound
+	}
+
+	for db, p := range ui.Privileges {
+		if db == database {
+			return &p, nil
+		}
+	}
+
+	return sql.NewPrivilege(sql.NoPrivileges), nil
 }
 
 // Clone returns a copy of data with a new version.

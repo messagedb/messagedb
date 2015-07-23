@@ -1,10 +1,10 @@
-package messageql
+package sql
 
 import (
 	"strings"
 )
 
-// Token is a lexical token of the MessageQL language.
+// Token is a lexical token of the MessageDB SQL language.
 type Token int
 
 const (

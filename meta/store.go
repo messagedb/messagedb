@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messagedb/messagedb/messageql"
 	"github.com/messagedb/messagedb/meta/internal"
+	"github.com/messagedb/messagedb/sql"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/hashicorp/raft"
@@ -80,8 +80,8 @@ type MetaStore interface {
 	CreateUser(name, password string, admin bool) (*UserInfo, error)
 	DropUser(name string) error
 	UpdateUser(name, password string) error
-	SetPrivilege(username, database string, p messageql.Privilege) error
-	UserPrivileges(username string) (p map[string]messageql.Privilege, err error)
+	SetPrivilege(username, database string, p sql.Privilege) error
+	UserPrivileges(username string) (p map[string]sql.Privilege, err error)
 }
 
 // Store represents a raft-backed metastore.
@@ -381,7 +381,7 @@ func (s *Store) init() {
 // Writes the id of the node to file on success.
 func (s *Store) createLocalNode() error {
 	// Wait for leader.
-	if err := s.WaitForLeader(5 * time.Second); err != nil {
+	if err := s.WaitForLeader(0); err != nil {
 		return fmt.Errorf("wait for leader: %s", err)
 	}
 
@@ -411,6 +411,7 @@ func (s *Store) Snapshot() error {
 }
 
 // WaitForLeader sleeps until a leader is found or a timeout occurs.
+// timeout == 0 means to wait forever.
 func (s *Store) WaitForLeader(timeout time.Duration) error {
 	if s.raft.Leader() != "" {
 		return nil
@@ -428,7 +429,9 @@ func (s *Store) WaitForLeader(timeout time.Duration) error {
 		case <-s.closing:
 			return errors.New("closing")
 		case <-timer.C:
-			return errors.New("timeout")
+			if timeout != 0 {
+				return errors.New("timeout")
+			}
 		case <-ticker.C:
 			if s.raft.Leader() != "" {
 				return nil
@@ -497,10 +500,9 @@ func (s *Store) serveExecListener() {
 		if err != nil {
 			if strings.Contains(err.Error(), "connection closed") {
 				return
-			} else {
-				s.Logger.Printf("temporary accept error: %s", err)
-				continue
 			}
+			s.Logger.Printf("temporary accept error: %s", err)
+			continue
 		}
 
 		// Handle connection in a separate goroutine.
@@ -711,11 +713,11 @@ func (s *Store) CreateDatabaseIfNotExists(name string) (*DatabaseInfo, error) {
 	}
 
 	// Attempt to create database.
-	if di, err := s.CreateDatabase(name); err == ErrDatabaseExists {
+	di, err := s.CreateDatabase(name)
+	if err == ErrDatabaseExists {
 		return s.Database(name)
-	} else {
-		return di, err
 	}
+	return di, err
 }
 
 // DropDatabase removes a database from the metastore by name.
@@ -800,11 +802,11 @@ func (s *Store) CreateRetentionPolicyIfNotExists(database string, rpi *Retention
 	}
 
 	// Attempt to create policy.
-	if other, err := s.CreateRetentionPolicy(database, rpi); err == ErrRetentionPolicyExists {
+	other, err := s.CreateRetentionPolicy(database, rpi)
+	if err == ErrRetentionPolicyExists {
 		return s.RetentionPolicy(database, rpi.Name)
-	} else {
-		return other, err
 	}
+	return other, err
 }
 
 // SetDefaultRetentionPolicy sets the default retention policy for a database.
@@ -874,7 +876,6 @@ func (s *Store) CreateShardGroup(database, policy string, timestamp time.Time) (
 
 // CreateShardGroupIfNotExists creates a new shard group if one doesn't already exist.
 func (s *Store) CreateShardGroupIfNotExists(database, policy string, timestamp time.Time) (*ShardGroupInfo, error) {
-	var err error
 	// Try to find shard group locally first.
 	if sgi, err := s.ShardGroupByTimestamp(database, policy, timestamp); err != nil {
 		return nil, err
@@ -883,8 +884,8 @@ func (s *Store) CreateShardGroupIfNotExists(database, policy string, timestamp t
 	}
 
 	// Attempt to create database.
-	var sgi *ShardGroupInfo
-	if sgi, err = s.CreateShardGroup(database, policy, timestamp); err == ErrShardGroupExists {
+	sgi, err := s.CreateShardGroup(database, policy, timestamp)
+	if err == ErrShardGroupExists {
 		return s.ShardGroupByTimestamp(database, policy, timestamp)
 	}
 	return sgi, err
@@ -1130,7 +1131,7 @@ func (s *Store) UpdateUser(name, password string) error {
 }
 
 // SetPrivilege sets a privilege for a user on a database.
-func (s *Store) SetPrivilege(username, database string, p messageql.Privilege) error {
+func (s *Store) SetPrivilege(username, database string, p sql.Privilege) error {
 	return s.exec(internal.Command_SetPrivilegeCommand, internal.E_SetPrivilegeCommand_Command,
 		&internal.SetPrivilegeCommand{
 			Username:  proto.String(username),
@@ -1140,10 +1141,29 @@ func (s *Store) SetPrivilege(username, database string, p messageql.Privilege) e
 	)
 }
 
+// SetAdminPrivilege sets the admin privilege for a user on a database.
+func (s *Store) SetAdminPrivilege(username string, admin bool) error {
+	return s.exec(internal.Command_SetAdminPrivilegeCommand, internal.E_SetAdminPrivilegeCommand_Command,
+		&internal.SetAdminPrivilegeCommand{
+			Username: proto.String(username),
+			Admin:    proto.Bool(admin),
+		},
+	)
+}
+
 // UserPrivileges returns a list of all databases.
-func (s *Store) UserPrivileges(username string) (p map[string]messageql.Privilege, err error) {
+func (s *Store) UserPrivileges(username string) (p map[string]sql.Privilege, err error) {
 	err = s.read(func(data *Data) error {
 		p, err = data.UserPrivileges(username)
+		return err
+	})
+	return
+}
+
+// UserPrivilege returns the privilege for a database.
+func (s *Store) UserPrivilege(username, database string) (p *sql.Privilege, err error) {
+	err = s.read(func(data *Data) error {
+		p, err = data.UserPrivilege(username, database)
 		return err
 	})
 	return
@@ -1227,9 +1247,8 @@ func (s *Store) exec(typ internal.Command_Type, desc *proto.ExtensionDesc, value
 	// Otherwise remotely execute the command against the current leader.
 	if s.raft.State() == raft.Leader {
 		return s.apply(b)
-	} else {
-		return s.remoteExec(b)
 	}
+	return s.remoteExec(b)
 }
 
 // apply applies a serialized command to the raft log.
@@ -1408,6 +1427,8 @@ func (fsm *storeFSM) Apply(l *raft.Log) interface{} {
 			return fsm.applyUpdateUserCommand(&cmd)
 		case internal.Command_SetPrivilegeCommand:
 			return fsm.applySetPrivilegeCommand(&cmd)
+		case internal.Command_SetAdminPrivilegeCommand:
+			return fsm.applySetAdminPrivilegeCommand(&cmd)
 		case internal.Command_SetDataCommand:
 			return fsm.applySetDataCommand(&cmd)
 		default:
@@ -1661,7 +1682,20 @@ func (fsm *storeFSM) applySetPrivilegeCommand(cmd *internal.Command) interface{}
 
 	// Copy data and update.
 	other := fsm.data.Clone()
-	if err := other.SetPrivilege(v.GetUsername(), v.GetDatabase(), messageql.Privilege(v.GetPrivilege())); err != nil {
+	if err := other.SetPrivilege(v.GetUsername(), v.GetDatabase(), sql.Privilege(v.GetPrivilege())); err != nil {
+		return err
+	}
+	fsm.data = other
+	return nil
+}
+
+func (fsm *storeFSM) applySetAdminPrivilegeCommand(cmd *internal.Command) interface{} {
+	ext, _ := proto.GetExtension(cmd, internal.E_SetAdminPrivilegeCommand_Command)
+	v := ext.(*internal.SetAdminPrivilegeCommand)
+
+	// Copy data and update.
+	other := fsm.data.Clone()
+	if err := other.SetAdminPrivilege(v.GetUsername(), v.GetAdmin()); err != nil {
 		return err
 	}
 	fsm.data = other

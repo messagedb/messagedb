@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/messagedb/messagedb/messageql"
 	"github.com/messagedb/messagedb/meta"
+	"github.com/messagedb/messagedb/sql"
 )
 
-// QueryExecutor executes every statement in an influxdb Query. It is responsible for
+// QueryExecutor executes every statement in an MessageDB Query. It is responsible for
 // coordinating between the local tsdb.Store, the meta.Store, and the other nodes in
 // the cluster to run the query against their local tsdb.Stores. There should be one executor
 // in a running process
@@ -33,7 +33,7 @@ type QueryExecutor struct {
 
 	// Executes statements relating to meta data.
 	MetaStatementExecutor interface {
-		ExecuteStatement(stmt messageql.Statement) *messageql.Result
+		ExecuteStatement(stmt sql.Statement) *sql.Result
 	}
 
 	// Maps shards for queries.
@@ -55,8 +55,8 @@ func NewQueryExecutor(store *Store) *QueryExecutor {
 	}
 }
 
-// Begin is for messageql/engine.go to use to get a transaction object to start the query
-// func (q *QueryExecutor) Begin() (messageql.Tx, error) {
+// Begin is for sql/engine.go to use to get a transaction object to start the query
+// func (q *QueryExecutor) Begin() (sql.Tx, error) {
 // 	return newTx(q.MetaStore, q.store), nil
 // }
 
@@ -64,28 +64,25 @@ func NewQueryExecutor(store *Store) *QueryExecutor {
 // database can be "" for queries that do not require a database.
 // If no user is provided it will return an error unless the query's first statement is to create
 // a root user.
-func (q *QueryExecutor) Authorize(u *meta.UserInfo, query *messageql.Query, database string) error {
-	const authErrLogFmt = "unauthorized request | user: %q | query: %q | database %q\n"
-
+func (q *QueryExecutor) Authorize(u *meta.UserInfo, query *sql.Query, database string) error {
 	// Special case if no users exist.
 	if count, err := q.MetaStore.UserCount(); count == 0 && err == nil {
-		// Get the first statement in the query.
-		stmt := query.Statements[0]
-		// First statement must create a root user.
-		if cu, ok := stmt.(*messageql.CreateUserStatement); !ok ||
-			cu.Privilege == nil ||
-			*cu.Privilege != messageql.AllPrivileges {
-			return ErrAuthorize{text: "no users exist. create root user first or disable authentication"}
+		// Ensure there is at least one statement.
+		if len(query.Statements) > 0 {
+			// First statement in the query must create a user with admin privilege.
+			cu, ok := query.Statements[0].(*sql.CreateUserStatement)
+			if ok && cu.Admin == true {
+				return nil
+			}
 		}
-		return nil
+		return NewErrAuthorize(q, query, "", database, "create admin user first or disable authentication")
 	}
 
 	if u == nil {
-		q.Logger.Printf(authErrLogFmt, "", query.String(), database)
-		return ErrAuthorize{text: "no user provided"}
+		return NewErrAuthorize(q, query, "", database, "no user provided")
 	}
 
-	// Cluster admins can do anything.
+	// Admin privilege allows the user to execute all statements.
 	if u.Admin {
 		return nil
 	}
@@ -95,59 +92,56 @@ func (q *QueryExecutor) Authorize(u *meta.UserInfo, query *messageql.Query, data
 		// Get the privileges required to execute the statement.
 		privs := stmt.RequiredPrivileges()
 
-		// Make sure the user has each privilege required to execute
-		// the statement.
+		// Make sure the user has the privileges required to execute
+		// each statement.
 		for _, p := range privs {
+			if p.Admin {
+				// Admin privilege already checked so statement requiring admin
+				// privilege cannot be run.
+				msg := fmt.Sprintf("statement '%s', requires admin privilege", stmt)
+				return NewErrAuthorize(q, query, u.Name, database, msg)
+			}
+
 			// Use the db name specified by the statement or the db
 			// name passed by the caller if one wasn't specified by
 			// the statement.
-			dbname := p.Name
-			if dbname == "" {
-				dbname = database
+			db := p.Name
+			if db == "" {
+				db = database
 			}
-
-			// Check if user has required privilege.
-			if !u.Authorize(p.Privilege, dbname) {
-				var msg string
-				if dbname == "" {
-					msg = "requires cluster admin"
-				} else {
-					msg = fmt.Sprintf("requires %s privilege on %s", p.Privilege.String(), dbname)
-				}
-				q.Logger.Printf(authErrLogFmt, u.Name, query.String(), database)
-				return ErrAuthorize{
-					text: fmt.Sprintf("%s not authorized to execute '%s'.  %s", u.Name, stmt.String(), msg),
-				}
+			if !u.Authorize(p.Privilege, db) {
+				msg := fmt.Sprintf("statement '%s', requires %s on %s", stmt, p.Privilege.String(), db)
+				return NewErrAuthorize(q, query, u.Name, database, msg)
 			}
 		}
 	}
 	return nil
 }
 
-// ExecuteQuery executes an InfluxQL query against the server.
+// ExecuteQuery executes an sql query against the server.
 // It sends results down the passed in chan and closes it when done. It will close the chan
 // on the first statement that throws an error.
-func (q *QueryExecutor) ExecuteQuery(query *messageql.Query, database string, chunkSize int) (<-chan *messageql.Result, error) {
+func (q *QueryExecutor) ExecuteQuery(query *sql.Query, database string, chunkSize int) (<-chan *sql.Result, error) {
 	// Execute each statement. Keep the iterator external so we can
 	// track how many of the statements were executed
-	results := make(chan *messageql.Result)
+	results := make(chan *sql.Result)
 	go func() {
 		var i int
-		var stmt messageql.Statement
+		var stmt sql.Statement
 		for i, stmt = range query.Statements {
 			// If a default database wasn't passed in by the caller, check the statement.
 			// Some types of statements have an associated default database, even if it
 			// is not explicitly included.
 			defaultDB := database
 			if defaultDB == "" {
-				if s, ok := stmt.(messageql.HasDefaultDatabase); ok {
+				if s, ok := stmt.(sql.HasDefaultDatabase); ok {
 					defaultDB = s.DefaultDatabase()
 				}
 			}
 
 			// Normalize each statement.
 			if err := q.normalizeStatement(stmt, defaultDB); err != nil {
-				results <- &messageql.Result{Err: err}
+				results <- &sql.Result{Err: err}
 				break
 			}
 
@@ -157,23 +151,23 @@ func (q *QueryExecutor) ExecuteQuery(query *messageql.Query, database string, ch
 			// func (*DropRetentionPolicyStatement) stmt() {}
 			// func (*DropUserStatement) stmt()            {}
 
-			var res *messageql.Result
+			var res *sql.Result
 			switch stmt := stmt.(type) {
-			case *messageql.SelectStatement:
+			case *sql.SelectStatement:
 				if err := q.executeSelectStatement(i, stmt, results, chunkSize); err != nil {
-					results <- &messageql.Result{Err: err}
+					results <- &sql.Result{Err: err}
 					break
 				}
-			case *messageql.DropConversationStatement:
+			case *sql.DropConversationStatement:
 				// TODO: handle this in a cluster
 				res = q.executeDropConversationStatement(stmt, database)
-			case *messageql.ShowConversationsStatement:
+			case *sql.ShowConversationsStatement:
 				res = q.executeShowConversationsStatement(stmt, database)
-			case *messageql.ShowDiagnosticsStatement:
+			case *sql.ShowDiagnosticsStatement:
 				res = q.executeShowDiagnosticsStatement(stmt)
-			case *messageql.DeleteStatement:
-				res = &messageql.Result{Err: ErrInvalidQuery}
-			case *messageql.DropDatabaseStatement:
+			case *sql.DeleteStatement:
+				res = &sql.Result{Err: ErrInvalidQuery}
+			case *sql.DropDatabaseStatement:
 				// TODO: handle this in a cluster
 				res = q.executeDropDatabaseStatement(stmt)
 			default:
@@ -195,7 +189,7 @@ func (q *QueryExecutor) ExecuteQuery(query *messageql.Query, database string, ch
 
 		// if there was an error send results that the remaining statements weren't executed
 		for ; i < len(query.Statements)-1; i++ {
-			results <- &messageql.Result{Err: ErrNotExecuted}
+			results <- &sql.Result{Err: ErrNotExecuted}
 		}
 
 		close(results)
@@ -205,12 +199,12 @@ func (q *QueryExecutor) ExecuteQuery(query *messageql.Query, database string, ch
 }
 
 // Plan creates an execution plan for the given SelectStatement and returns an Executor.
-func (q *QueryExecutor) plan(stmt *messageql.SelectStatement, chunkSize int) (Executor, error) {
+func (q *QueryExecutor) plan(stmt *sql.SelectStatement, chunkSize int) (*Executor, error) {
 	shards := map[uint64]meta.ShardInfo{} // Shards requiring mappers.
 
 	// Replace instances of "now()" with the current time, and check the resultant times.
-	stmt.Condition = messageql.Reduce(stmt.Condition, &messageql.NowValuer{Now: time.Now().UTC()})
-	tmin, tmax := messageql.TimeRange(stmt.Condition)
+	stmt.Condition = sql.Reduce(stmt.Condition, &sql.NowValuer{Now: time.Now().UTC()})
+	tmin, tmax := sql.TimeRange(stmt.Condition)
 	if tmax.IsZero() {
 		tmax = time.Now()
 	}
@@ -219,7 +213,7 @@ func (q *QueryExecutor) plan(stmt *messageql.SelectStatement, chunkSize int) (Ex
 	}
 
 	for _, src := range stmt.Sources {
-		mm, ok := src.(*messageql.Conversation)
+		mm, ok := src.(*sql.Conversation)
 		if !ok {
 			return nil, fmt.Errorf("invalid source type: %#v", src)
 		}
@@ -251,22 +245,12 @@ func (q *QueryExecutor) plan(stmt *messageql.SelectStatement, chunkSize int) (Ex
 		mappers = append(mappers, m)
 	}
 
-	var executor Executor
-	if len(mappers) > 0 {
-		executor = NewRawExecutor(stmt, mappers, chunkSize)
-	} else {
-		executor = NewRawExecutor(stmt, nil, chunkSize)
-	}
-
-	// if stmt.IsRawQuery && !stmt.HasDistinct() {
-	// 	return NewRawExecutor(stmt, mappers, chunkSize), nil
-	// }
-	// return NewAggregateExecutor(stmt, mappers), nil
+	executor := NewExecutor(stmt, mappers, chunkSize)
 	return executor, nil
 }
 
 // executeSelectStatement plans and executes a select statement against a database.
-func (q *QueryExecutor) executeSelectStatement(statementID int, stmt *messageql.SelectStatement, results chan *messageql.Result, chunkSize int) error {
+func (q *QueryExecutor) executeSelectStatement(statementID int, stmt *sql.SelectStatement, results chan *sql.Result, chunkSize int) error {
 	// Perform any necessary query re-writing.
 	stmt, err := q.rewriteSelectStatement(stmt)
 	if err != nil {
@@ -289,18 +273,18 @@ func (q *QueryExecutor) executeSelectStatement(statementID int, stmt *messageql.
 			return row.Err
 		}
 		resultSent = true
-		results <- &messageql.Result{StatementID: statementID, Rows: []*messageql.Row{row}}
+		results <- &sql.Result{StatementID: statementID, Rows: []*sql.Row{row}}
 	}
 
 	if !resultSent {
-		results <- &messageql.Result{StatementID: statementID, Rows: make([]*messageql.Row, 0)}
+		results <- &sql.Result{StatementID: statementID, Rows: make([]*sql.Row, 0)}
 	}
 
 	return nil
 }
 
 // rewriteSelectStatement performs any necessary query re-writing.
-func (q *QueryExecutor) rewriteSelectStatement(stmt *messageql.SelectStatement) (*messageql.SelectStatement, error) {
+func (q *QueryExecutor) rewriteSelectStatement(stmt *sql.SelectStatement) (*sql.SelectStatement, error) {
 	var err error
 
 	// Expand regex expressions in the FROM clause.
@@ -325,16 +309,16 @@ func (q *QueryExecutor) rewriteSelectStatement(stmt *messageql.SelectStatement) 
 
 // expandSources expands regex sources and removes duplicates.
 // NOTE: sources must be normalized (db and rp set) before calling this function.
-func (q *QueryExecutor) expandSources(sources messageql.Sources) (messageql.Sources, error) {
+func (q *QueryExecutor) expandSources(sources sql.Sources) (sql.Sources, error) {
 	// Use a map as a set to prevent duplicates. Two regexes might produce
 	// duplicates when expanded.
-	set := map[string]messageql.Source{}
+	set := map[string]sql.Source{}
 	names := []string{}
 
 	// Iterate all sources, expanding regexes when they're found.
 	for _, source := range sources {
 		switch src := source.(type) {
-		case *messageql.Conversation:
+		case *sql.Conversation:
 			if src.Regex == nil {
 				name := src.String()
 				set[name] = src
@@ -353,7 +337,7 @@ func (q *QueryExecutor) expandSources(sources messageql.Sources) (messageql.Sour
 
 			// Add those conversations to the set.
 			for _, m := range conversations {
-				m2 := &messageql.Conversation{
+				m2 := &sql.Conversation{
 					Database:        src.Database,
 					RetentionPolicy: src.RetentionPolicy,
 					Name:            m.Name,
@@ -375,7 +359,7 @@ func (q *QueryExecutor) expandSources(sources messageql.Sources) (messageql.Sour
 	sort.Strings(names)
 
 	// Convert set to a list of Sources.
-	expanded := make(messageql.Sources, 0, len(set))
+	expanded := make(sql.Sources, 0, len(set))
 	for _, name := range names {
 		expanded = append(expanded, set[name])
 	}
@@ -385,12 +369,12 @@ func (q *QueryExecutor) expandSources(sources messageql.Sources) (messageql.Sour
 
 // executeDropDatabaseStatement closes all local shards for the database and removes the directory. It then calls to the metastore to remove the database from there.
 // TODO: make this work in a cluster/distributed
-func (q *QueryExecutor) executeDropDatabaseStatement(stmt *messageql.DropDatabaseStatement) *messageql.Result {
+func (q *QueryExecutor) executeDropDatabaseStatement(stmt *sql.DropDatabaseStatement) *sql.Result {
 	dbi, err := q.MetaStore.Database(stmt.Name)
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	} else if dbi == nil {
-		return &messageql.Result{Err: ErrDatabaseNotFound(stmt.Name)}
+		return &sql.Result{Err: ErrDatabaseNotFound(stmt.Name)}
 	}
 
 	var shardIDs []uint64
@@ -404,50 +388,50 @@ func (q *QueryExecutor) executeDropDatabaseStatement(stmt *messageql.DropDatabas
 
 	err = q.store.DeleteDatabase(stmt.Name, shardIDs)
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
 	return q.MetaStatementExecutor.ExecuteStatement(stmt)
 }
 
 // executeDropConversationStatement removes all series from the local store that match the drop query
-func (q *QueryExecutor) executeDropConversationStatement(stmt *messageql.DropConversationStatement, database string) *messageql.Result {
+func (q *QueryExecutor) executeDropConversationStatement(stmt *sql.DropConversationStatement, database string) *sql.Result {
 	// Find the database.
 	db := q.store.DatabaseIndex(database)
 	if db == nil {
-		return &messageql.Result{}
+		return &sql.Result{}
 	}
 
 	m := db.Conversation(stmt.Name)
 	if m == nil {
-		return &messageql.Result{Err: ErrConversationNotFound(stmt.Name)}
+		return &sql.Result{Err: ErrConversationNotFound(stmt.Name)}
 	}
 
 	db.DropConversation(m.Name)
 
 	if err := q.store.deleteConversation(m.Name); err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
-	return &messageql.Result{}
+	return &sql.Result{}
 }
 
-func (q *QueryExecutor) executeShowConversationsStatement(stmt *messageql.ShowConversationsStatement, database string) *messageql.Result {
+func (q *QueryExecutor) executeShowConversationsStatement(stmt *sql.ShowConversationsStatement, database string) *sql.Result {
 	// Find the database.
 	db := q.store.DatabaseIndex(database)
 	if db == nil {
-		return &messageql.Result{}
+		return &sql.Result{}
 	}
 
 	sources, err := q.expandSources(stmt.Sources)
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
 	// Get the list of measurements we're interested in.
 	conversations, err := conversationsFromSourcesOrDB(db, sources...)
 	if err != nil {
-		return &messageql.Result{Err: err}
+		return &sql.Result{Err: err}
 	}
 
 	sort.Sort(conversations)
@@ -457,7 +441,7 @@ func (q *QueryExecutor) executeShowConversationsStatement(stmt *messageql.ShowCo
 
 	// If OFFSET is past the end of the array, return empty results.
 	if offset > len(conversations)-1 {
-		return &messageql.Result{}
+		return &sql.Result{}
 	}
 
 	// Calculate last index based on LIMIT.
@@ -469,7 +453,7 @@ func (q *QueryExecutor) executeShowConversationsStatement(stmt *messageql.ShowCo
 	}
 
 	// Make a result row to hold all measurement names.
-	row := &messageql.Row{
+	row := &sql.Row{
 		Name:    "conversations",
 		Columns: []string{"name"},
 	}
@@ -482,8 +466,8 @@ func (q *QueryExecutor) executeShowConversationsStatement(stmt *messageql.ShowCo
 	}
 
 	// Make a result.
-	result := &messageql.Result{
-		Rows: []*messageql.Row{row},
+	result := &sql.Result{
+		Rows: []*sql.Row{row},
 	}
 
 	return result
@@ -492,11 +476,11 @@ func (q *QueryExecutor) executeShowConversationsStatement(stmt *messageql.ShowCo
 // conversationsFromSourcesOrDB returns a list of conversations from the
 // sources passed in or, if sources is empty, a list of all
 // conversations names from the database passed in.
-func conversationsFromSourcesOrDB(db *DatabaseIndex, sources ...messageql.Source) (Conversations, error) {
+func conversationsFromSourcesOrDB(db *DatabaseIndex, sources ...sql.Source) (Conversations, error) {
 	var conversations Conversations
 	if len(sources) > 0 {
 		for _, source := range sources {
-			if c, ok := source.(*messageql.Conversation); ok {
+			if c, ok := source.(*sql.Conversation); ok {
 				conversation := db.conversations[c.Name]
 				if conversation == nil {
 					return nil, ErrConversationNotFound(c.Name)
@@ -519,17 +503,17 @@ func conversationsFromSourcesOrDB(db *DatabaseIndex, sources ...messageql.Source
 }
 
 // normalizeStatement adds a default database and policy to the measurements in statement.
-func (q *QueryExecutor) normalizeStatement(stmt messageql.Statement, defaultDatabase string) (err error) {
+func (q *QueryExecutor) normalizeStatement(stmt sql.Statement, defaultDatabase string) (err error) {
 	// Track prefixes for replacing field names.
 	prefixes := make(map[string]string)
 
 	// Qualify all measurements.
-	messageql.WalkFunc(stmt, func(n messageql.Node) {
+	sql.WalkFunc(stmt, func(n sql.Node) {
 		if err != nil {
 			return
 		}
 		switch n := n.(type) {
-		case *messageql.Conversation:
+		case *sql.Conversation:
 			e := q.normalizeConversation(n, defaultDatabase)
 			if e != nil {
 				err = e
@@ -543,12 +527,12 @@ func (q *QueryExecutor) normalizeStatement(stmt messageql.Statement, defaultData
 	}
 
 	// Replace all variable references that used measurement prefixes.
-	messageql.WalkFunc(stmt, func(n messageql.Node) {
+	sql.WalkFunc(stmt, func(n sql.Node) {
 		switch n := n.(type) {
-		case *messageql.VarRef:
+		case *sql.VarRef:
 			for k, v := range prefixes {
 				if strings.HasPrefix(n.Val, k+".") {
-					n.Val = v + "." + messageql.QuoteIdent(n.Val[len(k)+1:])
+					n.Val = v + "." + sql.QuoteIdent(n.Val[len(k)+1:])
 				}
 			}
 		}
@@ -559,7 +543,7 @@ func (q *QueryExecutor) normalizeStatement(stmt messageql.Statement, defaultData
 
 // normalizeMeasurement inserts the default database or policy into all measurement names,
 // if required.
-func (q *QueryExecutor) normalizeConversation(m *messageql.Conversation, defaultDatabase string) error {
+func (q *QueryExecutor) normalizeConversation(m *sql.Conversation, defaultDatabase string) error {
 	if m.Name == "" && m.Regex == nil {
 		return errors.New("invalid conversation")
 	}
@@ -593,22 +577,34 @@ func (q *QueryExecutor) normalizeConversation(m *messageql.Conversation, default
 	return nil
 }
 
-func (q *QueryExecutor) executeShowDiagnosticsStatement(stmt *messageql.ShowDiagnosticsStatement) *messageql.Result {
-	return &messageql.Result{Err: fmt.Errorf("SHOW DIAGNOSTICS is not implemented yet")}
+func (q *QueryExecutor) executeShowDiagnosticsStatement(stmt *sql.ShowDiagnosticsStatement) *sql.Result {
+	return &sql.Result{Err: fmt.Errorf("SHOW DIAGNOSTICS is not implemented yet")}
 }
 
 // ErrAuthorize represents an authorization error.
 type ErrAuthorize struct {
-	text string
+	q        *QueryExecutor
+	query    *sql.Query
+	user     string
+	database string
+	message  string
+}
+
+const authErrLogFmt string = "unauthorized request | user: %q | query: %q | database %q\n"
+
+// newAuthorizationError returns a new instance of AuthorizationError.
+func NewErrAuthorize(qe *QueryExecutor, q *sql.Query, u, db, m string) *ErrAuthorize {
+	return &ErrAuthorize{q: qe, query: q, user: u, database: db, message: m}
 }
 
 // Error returns the text of the error.
 func (e ErrAuthorize) Error() string {
-	return e.text
+	e.q.Logger.Printf(authErrLogFmt, e.user, e.query.String(), e.database)
+	if e.user == "" {
+		return fmt.Sprint(e.message)
+	}
+	return fmt.Sprintf("%s not authorized to execute %s", e.user, e.message)
 }
-
-// authorize satisfies isAuthorizationError
-func (ErrAuthorize) authorize() {}
 
 var (
 	// ErrInvalidQuery is returned when executing an unknown query type.

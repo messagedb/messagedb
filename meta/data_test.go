@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/messagedb/messagedb/messageql"
+	"github.com/messagedb/messagedb/sql"
 	"github.com/messagedb/messagedb/meta"
 )
 
@@ -589,7 +589,7 @@ func TestData_Clone(t *testing.T) {
 				Name:       "susy",
 				Hash:       "ABC123",
 				Admin:      true,
-				Privileges: map[string]messageql.Privilege{"db0": messageql.AllPrivileges},
+				Privileges: map[string]sql.Privilege{"db0": sql.AllPrivileges},
 			},
 		},
 	}
@@ -656,7 +656,7 @@ func TestData_MarshalBinary(t *testing.T) {
 				Name:       "susy",
 				Hash:       "ABC123",
 				Admin:      true,
-				Privileges: map[string]messageql.Privilege{"db0": messageql.AllPrivileges},
+				Privileges: map[string]sql.Privilege{"db0": sql.AllPrivileges},
 			},
 		},
 	}

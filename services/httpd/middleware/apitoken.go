@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const ApiTokenHeaderKey = "X-Chatml-Api-Token"
+const ApiTokenHeaderKey = "X-MessageDB-Api-Token"
 
 func ApiTokenMiddleware() gin.HandlerFunc {
 	return func(ctx *gin.Context) {

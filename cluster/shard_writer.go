@@ -14,6 +14,8 @@ import (
 const (
 	writeShardRequestMessage byte = iota + 1
 	writeShardResponseMessage
+	mapShardRequestMessage
+	mapShardResponseMessage
 )
 
 // ShardWriter writes a set of points to a shard.

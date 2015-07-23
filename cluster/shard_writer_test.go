@@ -12,7 +12,7 @@ import (
 
 // Ensure the shard writer can successful write a single request.
 func TestShardWriter_WriteShard_Success(t *testing.T) {
-	ts := newTestService(writeShardSuccess)
+	ts := newTestWriteService(writeShardSuccess)
 	s := cluster.NewService(cluster.Config{})
 	s.Listener = ts.muxln
 	s.DataStore = ts
@@ -54,7 +54,7 @@ func TestShardWriter_WriteShard_Success(t *testing.T) {
 
 // Ensure the shard writer can successful write a multiple requests.
 func TestShardWriter_WriteShard_Multiple(t *testing.T) {
-	ts := newTestService(writeShardSuccess)
+	ts := newTestWriteService(writeShardSuccess)
 	s := cluster.NewService(cluster.Config{})
 	s.Listener = ts.muxln
 	s.DataStore = ts
@@ -98,7 +98,7 @@ func TestShardWriter_WriteShard_Multiple(t *testing.T) {
 
 // Ensure the shard writer returns an error when the server fails to accept the write.
 func TestShardWriter_WriteShard_Error(t *testing.T) {
-	ts := newTestService(writeShardFail)
+	ts := newTestWriteService(writeShardFail)
 	s := cluster.NewService(cluster.Config{})
 	s.Listener = ts.muxln
 	s.DataStore = ts
@@ -124,7 +124,7 @@ func TestShardWriter_WriteShard_Error(t *testing.T) {
 
 // Ensure the shard writer returns an error when dialing times out.
 func TestShardWriter_Write_ErrDialTimeout(t *testing.T) {
-	ts := newTestService(writeShardSuccess)
+	ts := newTestWriteService(writeShardSuccess)
 	s := cluster.NewService(cluster.Config{})
 	s.Listener = ts.muxln
 	s.DataStore = ts

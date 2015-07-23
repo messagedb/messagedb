@@ -76,7 +76,8 @@ func NewServer(c *Config, version string) (*Server, error) {
 	s.DataStore.WALPartitionFlushDelay = time.Duration(c.Data.WALPartitionFlushDelay)
 
 	// Set the shard mapper
-	s.ShardMapper = cluster.NewShardMapper()
+	s.ShardMapper = cluster.NewShardMapper(time.Duration(c.Cluster.ShardMapperTimeout))
+	s.ShardMapper.ForceRemoteMapping = c.Cluster.ForceRemoteShardMapping
 	s.ShardMapper.MetaStore = s.MetaStore
 	s.ShardMapper.DataStore = s.DataStore
 

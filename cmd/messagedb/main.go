@@ -51,8 +51,8 @@ func main() {
 	c := CommandLine{}
 
 	fs := flag.NewFlagSet("MessageDB shell version "+version, flag.ExitOnError)
-	fs.StringVar(&c.Host, "host", default_host, "Influxdb host to connect to.")
-	fs.IntVar(&c.Port, "port", default_port, "Influxdb port to connect to.")
+	fs.StringVar(&c.Host, "host", default_host, "MessageDB host to connect to.")
+	fs.IntVar(&c.Port, "port", default_port, "MessageDB port to connect to.")
 	fs.StringVar(&c.Username, "username", c.Username, "Username to connect to the server.")
 	fs.StringVar(&c.Password, "password", c.Password, `Password to connect to the server.  Leaving blank will prompt for password (--password="").`)
 	fs.StringVar(&c.Database, "database", c.Database, "Database to connect to the server.")
@@ -629,7 +629,7 @@ func (c *CommandLine) help() {
         show conversations    show conversations information
         show users            show users information
 
-        a full list of messageql commands can be found at:
+        a full list of sql commands can be found at:
         http://messagedb.com/docs
 `)
 }

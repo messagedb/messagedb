@@ -5,7 +5,7 @@ import (
 
 	"github.com/messagedb/messagedb/cluster"
 	"github.com/messagedb/messagedb/db"
-	"github.com/messagedb/messagedb/messageql"
+	"github.com/messagedb/messagedb/sql"
 	"github.com/messagedb/messagedb/meta"
 	"github.com/messagedb/messagedb/services/httpd/helpers"
 
@@ -23,7 +23,7 @@ type MessagesController struct {
 	}
 
 	QueryExecutor interface {
-		ExecuteQuery(q *messageql.Query, db string, chunkSize int) (<-chan *messageql.Result, error)
+		ExecuteQuery(q *sql.Query, db string, chunkSize int) (<-chan *sql.Result, error)
 	}
 
 	DataStore interface {

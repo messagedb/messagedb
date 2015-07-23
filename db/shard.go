@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messagedb/messagedb/messageql"
 	"github.com/messagedb/messagedb/db/internal"
+	"github.com/messagedb/messagedb/sql"
 
 	"github.com/boltdb/bolt"
 	"github.com/gogo/protobuf/proto"
@@ -421,7 +421,7 @@ func (c *conversationFields) UnmarshalBinary(buf []byte) error {
 	}
 	c.Fields = make(map[string]*field)
 	for _, f := range pb.Fields {
-		c.Fields[f.GetName()] = &field{ID: uint8(f.GetID()), Name: f.GetName(), Type: messageql.DataType(f.GetType())}
+		c.Fields[f.GetName()] = &field{ID: uint8(f.GetID()), Name: f.GetName(), Type: sql.DataType(f.GetType())}
 	}
 	return nil
 }
@@ -429,7 +429,7 @@ func (c *conversationFields) UnmarshalBinary(buf []byte) error {
 // createFieldIfNotExists creates a new field with an autoincrementing ID.
 // Returns an error if 255 fields have already been created on the measurement or
 // the fields already exists with a different type.
-func (c *conversationFields) createFieldIfNotExists(name string, typ messageql.DataType) error {
+func (c *conversationFields) createFieldIfNotExists(name string, typ sql.DataType) error {
 	// Ignore if the field already exists.
 	if f := c.Fields[name]; f != nil {
 		if f.Type != typ {
@@ -457,9 +457,9 @@ func (c *conversationFields) createFieldIfNotExists(name string, typ messageql.D
 
 // Field represents a series field.
 type field struct {
-	ID   uint8              `json:"id,omitempty"`
-	Name string             `json:"name,omitempty"`
-	Type messageql.DataType `json:"type,omitempty"`
+	ID   uint8        `json:"id,omitempty"`
+	Name string       `json:"name,omitempty"`
+	Type sql.DataType `json:"type,omitempty"`
 }
 
 // FieldCodec provides encoding and decoding functionality for the fields of a given
@@ -499,18 +499,18 @@ func (f *FieldCodec) EncodeFields(values map[string]interface{}) ([]byte, error)
 		field := f.fieldsByName[k]
 		if field == nil {
 			panic(fmt.Sprintf("field does not exist for %s", k))
-		} else if messageql.InspectDataType(v) != field.Type {
+		} else if sql.InspectDataType(v) != field.Type {
 			return nil, fmt.Errorf("field \"%s\" is type %T, mapped as type %s", k, v, field.Type)
 		}
 
 		var buf []byte
 
 		switch field.Type {
-		case messageql.Float:
+		case sql.Float:
 			value := v.(float64)
 			buf = make([]byte, 9)
 			binary.BigEndian.PutUint64(buf[1:9], math.Float64bits(value))
-		case messageql.Integer:
+		case sql.Integer:
 			var value uint64
 			switch v.(type) {
 			case int:
@@ -524,7 +524,7 @@ func (f *FieldCodec) EncodeFields(values map[string]interface{}) ([]byte, error)
 			}
 			buf = make([]byte, 9)
 			binary.BigEndian.PutUint64(buf[1:9], value)
-		case messageql.Boolean:
+		case sql.Boolean:
 			value := v.(bool)
 
 			// Only 1 byte need for a boolean.
@@ -532,7 +532,7 @@ func (f *FieldCodec) EncodeFields(values map[string]interface{}) ([]byte, error)
 			if value {
 				buf[1] = byte(1)
 			}
-		case messageql.String:
+		case sql.String:
 			value := v.(string)
 			if len(value) > maxStringLength {
 				value = value[:maxStringLength]
@@ -593,15 +593,15 @@ func (f *FieldCodec) DecodeFields(b []byte) (map[uint8]interface{}, error) {
 
 		var value interface{}
 		switch field.Type {
-		case messageql.Float:
+		case sql.Float:
 			value = math.Float64frombits(binary.BigEndian.Uint64(b[1:9]))
 			// Move bytes forward.
 			b = b[9:]
-		case messageql.Integer:
+		case sql.Integer:
 			value = int64(binary.BigEndian.Uint64(b[1:9]))
 			// Move bytes forward.
 			b = b[9:]
-		case messageql.Boolean:
+		case sql.Boolean:
 			if b[1] == 1 {
 				value = true
 			} else {
@@ -609,7 +609,7 @@ func (f *FieldCodec) DecodeFields(b []byte) (map[uint8]interface{}, error) {
 			}
 			// Move bytes forward.
 			b = b[2:]
-		case messageql.String:
+		case sql.String:
 			size := binary.BigEndian.Uint16(b[1:3])
 			value = string(b[3 : size+3])
 			// Move bytes forward.
@@ -667,14 +667,14 @@ func (f *FieldCodec) DecodeByID(targetID uint8, b []byte) (interface{}, error) {
 
 		var value interface{}
 		switch field.Type {
-		case messageql.Float:
+		case sql.Float:
 			// Move bytes forward.
 			value = math.Float64frombits(binary.BigEndian.Uint64(b[1:9]))
 			b = b[9:]
-		case messageql.Integer:
+		case sql.Integer:
 			value = int64(binary.BigEndian.Uint64(b[1:9]))
 			b = b[9:]
-		case messageql.Boolean:
+		case sql.Boolean:
 			if b[1] == 1 {
 				value = true
 			} else {
@@ -682,7 +682,7 @@ func (f *FieldCodec) DecodeByID(targetID uint8, b []byte) (interface{}, error) {
 			}
 			// Move bytes forward.
 			b = b[2:]
-		case messageql.String:
+		case sql.String:
 			size := binary.BigEndian.Uint16(b[1:3])
 			value = string(b[3 : 3+size])
 			// Move bytes forward.
@@ -702,11 +702,11 @@ func (f *FieldCodec) DecodeByID(targetID uint8, b []byte) (interface{}, error) {
 // DecodeByName scans a byte slice for a field with the given name, converts it to its
 // expected type, and return that value.
 func (f *FieldCodec) DecodeByName(name string, b []byte) (interface{}, error) {
-	if fi := f.fieldByName(name); fi == nil {
+	fi := f.fieldByName(name)
+	if fi == nil {
 		return 0, ErrFieldNotFound
-	} else {
-		return f.DecodeByID(fi.ID, b)
 	}
+	return f.DecodeByID(fi.ID, b)
 }
 
 // FieldByName returns the field by its name. It will return a nil if not found

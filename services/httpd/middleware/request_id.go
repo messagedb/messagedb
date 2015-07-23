@@ -7,7 +7,7 @@ import (
 
 const (
 	RequestIDHeaderKey = "X-Request-Id"
-	ServerHeaderValue  = "Chatml"
+	ServerHeaderValue  = "MessageDB"
 )
 
 func RequestIdMiddleware() gin.HandlerFunc {

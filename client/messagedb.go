@@ -11,8 +11,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/messagedb/messagedb/messageql"
 	"github.com/messagedb/messagedb/db"
+	"github.com/messagedb/messagedb/sql"
 )
 
 // Query is used to send a command to the server. Both Command and Database are required.
@@ -24,7 +24,7 @@ type Query struct {
 // Config is used to specify what server to connect to.
 // URL: The URL of the server connecting to.
 // Username/Password are optional.  They will be passed via basic auth if provided.
-// UserAgent: If not provided, will default "InfluxDBClient",
+// UserAgent: If not provided, will default "MessageDBClient",
 // Timeout: If not provided, will default to 0 (no timeout)
 type Config struct {
 	URL       url.URL
@@ -60,7 +60,7 @@ func NewClient(c Config) (*Client, error) {
 		userAgent:  c.UserAgent,
 	}
 	if client.userAgent == "" {
-		client.userAgent = "InfluxDBClient"
+		client.userAgent = "MessageDBClient"
 	}
 	return &client, nil
 }
@@ -205,7 +205,7 @@ func (c *Client) Ping() (time.Duration, string, error) {
 	}
 	defer resp.Body.Close()
 
-	version := resp.Header.Get("X-Influxdb-Version")
+	version := resp.Header.Get("X-MessageDB-Version")
 	return time.Since(now), version, nil
 }
 
@@ -241,7 +241,7 @@ func (c *Client) Dump(db string) (io.ReadCloser, error) {
 
 // Result represents a resultset returned from a single statement.
 type Result struct {
-	Series []messageql.Row
+	Series []sql.Row
 	Err    error
 }
 
@@ -249,8 +249,8 @@ type Result struct {
 func (r *Result) MarshalJSON() ([]byte, error) {
 	// Define a struct that outputs "error" as a string.
 	var o struct {
-		Series []messageql.Row `json:"series,omitempty"`
-		Err    string          `json:"error,omitempty"`
+		Series []sql.Row `json:"series,omitempty"`
+		Err    string    `json:"error,omitempty"`
 	}
 
 	// Copy fields to output struct.
@@ -265,8 +265,8 @@ func (r *Result) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON decodes the data into the Result struct
 func (r *Result) UnmarshalJSON(b []byte) error {
 	var o struct {
-		Series []messageql.Row `json:"series,omitempty"`
-		Err    string          `json:"error,omitempty"`
+		Series []sql.Row `json:"series,omitempty"`
+		Err    string    `json:"error,omitempty"`
 	}
 
 	dec := json.NewDecoder(bytes.NewBuffer(b))

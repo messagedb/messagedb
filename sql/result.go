@@ -1,4 +1,4 @@
-package messageql
+package sql
 
 import (
 	"encoding/json"

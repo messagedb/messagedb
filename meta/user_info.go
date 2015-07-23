@@ -2,8 +2,8 @@ package meta
 
 import (
 	"github.com/gogo/protobuf/proto"
-	"github.com/messagedb/messagedb/messageql"
 	"github.com/messagedb/messagedb/meta/internal"
+	"github.com/messagedb/messagedb/sql"
 )
 
 // UserInfo represents metadata about a user in the system.
@@ -11,13 +11,16 @@ type UserInfo struct {
 	Name       string
 	Hash       string
 	Admin      bool
-	Privileges map[string]messageql.Privilege
+	Privileges map[string]sql.Privilege
 }
 
 // Authorize returns true if the user is authorized and false if not.
-func (ui *UserInfo) Authorize(privilege messageql.Privilege, database string) bool {
+func (ui *UserInfo) Authorize(privilege sql.Privilege, database string) bool {
+	if ui.Admin {
+		return true
+	}
 	p, ok := ui.Privileges[database]
-	return (ok && p >= privilege) || (ui.Admin)
+	return ok && (p == privilege || p == sql.AllPrivileges)
 }
 
 // clone returns a deep copy of si.
@@ -25,7 +28,7 @@ func (ui UserInfo) clone() UserInfo {
 	other := ui
 
 	if ui.Privileges != nil {
-		other.Privileges = make(map[string]messageql.Privilege)
+		other.Privileges = make(map[string]sql.Privilege)
 		for k, v := range ui.Privileges {
 			other.Privileges[k] = v
 		}
@@ -58,8 +61,8 @@ func (ui *UserInfo) unmarshal(pb *internal.UserInfo) {
 	ui.Hash = pb.GetHash()
 	ui.Admin = pb.GetAdmin()
 
-	ui.Privileges = make(map[string]messageql.Privilege)
+	ui.Privileges = make(map[string]sql.Privilege)
 	for _, p := range pb.GetPrivileges() {
-		ui.Privileges[p.GetDatabase()] = messageql.Privilege(p.GetPrivilege())
+		ui.Privileges[p.GetDatabase()] = sql.Privilege(p.GetPrivilege())
 	}
 }

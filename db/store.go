@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messagedb/messagedb/messageql"
+	"github.com/messagedb/messagedb/sql"
 )
 
 func NewStore(path string) *Store {
@@ -272,11 +272,11 @@ func (s *Store) Flush() error {
 }
 
 func (s *Store) CreateMapper(shardID uint64, query string, chunkSize int) (Mapper, error) {
-	q, err := messageql.NewParser(strings.NewReader(query)).ParseStatement()
+	q, err := sql.NewParser(strings.NewReader(query)).ParseStatement()
 	if err != nil {
 		return nil, err
 	}
-	stmt, ok := q.(*messageql.SelectStatement)
+	stmt, ok := q.(*sql.SelectStatement)
 	if !ok {
 		return nil, fmt.Errorf("query is not a SELECT statement: %s", err.Error())
 	}
@@ -287,11 +287,7 @@ func (s *Store) CreateMapper(shardID uint64, query string, chunkSize int) (Mappe
 		return nil, nil
 	}
 
-	// if stmt.IsRawQuery && !stmt.HasDistinct() {
-	// 	return NewRawMapper(shard, stmt, chunkSize), nil
-	// }
-	// return NewAggMapper(shard, stmt), nil
-	return NewRawMapper(shard, stmt, chunkSize), nil
+	return NewLocalMapper(shard, stmt, chunkSize), nil
 }
 
 func (s *Store) Close() error {

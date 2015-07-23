@@ -8,6 +8,7 @@ import (
 	"github.com/messagedb/messagedb/meta/services"
 	"github.com/messagedb/messagedb/services/httpd/helpers"
 	"github.com/messagedb/messagedb/services/httpd/presenters"
+	"github.com/messagedb/messagedb/sql"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,6 +16,10 @@ import (
 // SessionController handles RESTful API requests for an Session resources
 type SessionController struct {
 	Engine *gin.Engine
+
+	QueryExecutor interface {
+		Authorize(u *meta.UserInfo, q *sql.Query, db string) error
+	}
 
 	MetaStore interface {
 		Database(name string) (*meta.DatabaseInfo, error)

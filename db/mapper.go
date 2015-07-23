@@ -2,163 +2,165 @@ package db
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/boltdb/bolt"
-	"github.com/messagedb/messagedb/messageql"
+	"github.com/messagedb/messagedb/sql"
 )
 
-type rawMapperValue struct {
-	Time  int64       `json:"time,omitempty"`
-	Value interface{} `json:"value,omitempty"`
+// mapperValue is a complex type, which can encapsulate data from both raw and aggregate
+// mappers. This currently allows marshalling and network system to remain simpler. For
+// aggregate output Time is ignored, and actual Time-Value pairs are contained soley
+// within the Value field.
+type mapperValue struct {
+	Time  int64       `json:"time,omitempty"`  // Ignored for aggregate output.
+	Value interface{} `json:"value,omitempty"` // For aggregate, contains interval time multiple values.
 }
 
-type rawMapperValues []*rawMapperValue
+type mapperValues []*mapperValue
 
-func (a rawMapperValues) Len() int           { return len(a) }
-func (a rawMapperValues) Less(i, j int) bool { return a[i].Time < a[j].Time }
-func (a rawMapperValues) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a mapperValues) Len() int           { return len(a) }
+func (a mapperValues) Less(i, j int) bool { return a[i].Time < a[j].Time }
+func (a mapperValues) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
-type rawMapperOutput struct {
-	Name   string            `json:"name,omitempty"`
-	Tags   map[string]string `json:"tags,omitempty"`
-	Values rawMapperValues   `json:"values,omitempty"`
+type MapperOutput struct {
+	Name   string         `json:"name,omitempty"`
+	Values []*mapperValue `json:"values,omitempty"` // For aggregates contains a single value at [0]
 }
 
-func (mo *rawMapperOutput) key() string {
-	return formMeasurementTagSetKey(mo.Name, mo.Tags)
+func (mo *MapperOutput) key() string {
+	return mo.Name
 }
 
-// RawMapper is for retrieving data, for a raw query, for a single shard.
-type RawMapper struct {
-	shard     *Shard
-	stmt      *messageql.SelectStatement
-	chunkSize int
+// LocalMapper is for retrieving data for a query, from a given shard.
+type LocalMapper struct {
+	shard           *Shard
+	stmt            sql.Statement
+	selectStmt      *sql.SelectStatement
+	rawMode         bool
+	chunkSize       int
+	tx              *bolt.Tx              // Read transaction for this shard.
+	queryTMin       int64                 // Minimum time of the query.
+	queryTMax       int64                 // Maximum time of the query.
+	whereFields     []string              // field names that occur in the where clause
+	selectFields    []string              // field names that occur in the select clause
+	selectTags      []string              // tag keys that occur in the select clause
+	cursors         []*conversationCursor // Cursors per tag sets.
+	currCursorIndex int                   // Current tagset cursor being drained.
 
-	tx        *bolt.Tx // Read transaction for this shard.
-	queryTMin int64
-	queryTMax int64
+	// The following attributes are only used when mappers are for aggregate queries.
 
-	whereFields  []string               // field names that occur in the where clause
-	selectFields []string               // field names that occur in the select clause
-	selectTags   []string               // tag keys that occur in the select clause
-	fieldName    string                 // the field name being read.
-	decoders     map[string]*FieldCodec // byte decoder per measurement
-
-	cursors         []*tagSetCursor // Cursors per tag sets.
-	currCursorIndex int             // Current tagset cursor being drained.
+	queryTMinWindow int64         // Minimum time of the query floored to start of interval.
+	intervalSize    int64         // Size of each interval.
+	numIntervals    int           // Maximum number of intervals to return.
+	currInterval    int           // Current interval for which data is being fetched.
+	mapFuncs        []sql.MapFunc // The mapping functions.
+	fieldNames      []string      // the field name being read for mapping.
 }
 
-// NewRawMapper returns a mapper for the given shard, which will return data for the SELECT statement.
-func NewRawMapper(shard *Shard, stmt *messageql.SelectStatement, chunkSize int) *RawMapper {
-	return &RawMapper{
+// NewLocalMapper returns a mapper for the given shard, which will return data for the SELECT statement.
+func NewLocalMapper(shard *Shard, stmt sql.Statement, chunkSize int) *LocalMapper {
+	m := &LocalMapper{
 		shard:     shard,
 		stmt:      stmt,
 		chunkSize: chunkSize,
-		cursors:   make([]*tagSetCursor, 0),
+		cursors:   make([]*conversationCursor, 0),
 	}
+
+	if s, ok := stmt.(*sql.SelectStatement); ok {
+		m.selectStmt = s
+		// m.rawMode = (s.IsRawQuery && !s.HasDistinct()) || s.IsSimpleDerivative()
+		m.rawMode = true
+	}
+	return m
 }
 
-// Open opens the raw mapper.
-func (rm *RawMapper) Open() error {
+// openMeta opens the mapper for a meta query.
+func (lm *LocalMapper) openMeta() error {
+	return errors.New("not implemented")
+}
+
+// Open opens the local mapper.
+func (lm *LocalMapper) Open() error {
+	var err error
+
 	// Get a read-only transaction.
-	// tx, err := rm.shard.DB().Begin(false)
-	// if err != nil {
-	// 	return err
-	// }
-	// rm.tx = tx
-	//
-	// // Set all time-related parameters on the mapper.
-	// rm.queryTMin, rm.queryTMax = messageql.TimeRangeAsEpochNano(rm.stmt.Condition)
-	//
-	// // Create the TagSet cursors for the Mapper.
-	// for _, src := range rm.stmt.Sources {
-	// 	mm, ok := src.(*messageql.Conversation)
-	// 	if !ok {
-	// 		return fmt.Errorf("invalid source type: %#v", src)
-	// 	}
-	//
-	// 	m := rm.shard.index.Conversation(mm.Name)
-	// 	if m == nil {
-	// 		// This shard have never received data for the measurement. No Mapper
-	// 		// required.
-	// 		return nil
-	// 	}
-	//
-	// 	// Create tagset cursors and determine various field types within SELECT statement.
-	// 	tsf, err := createTagSetsAndFields(m, rm.stmt)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	tagSets := tsf.tagSets
-	// 	rm.selectFields = tsf.selectFields
-	// 	rm.selectTags = tsf.selectTags
-	// 	rm.whereFields = tsf.whereFields
-	//
-	// 	if len(rm.selectFields) == 0 {
-	// 		return fmt.Errorf("select statement must include at least one field")
-	// 	}
-	//
-	// 	// // SLIMIT and SOFFSET the unique series
-	// 	// if rm.stmt.SLimit > 0 || rm.stmt.SOffset > 0 {
-	// 	// 	if rm.stmt.SOffset > len(tagSets) {
-	// 	// 		tagSets = nil
-	// 	// 	} else {
-	// 	// 		if rm.stmt.SOffset+rm.stmt.SLimit > len(tagSets) {
-	// 	// 			rm.stmt.SLimit = len(tagSets) - rm.stmt.SOffset
-	// 	// 		}
-	// 	//
-	// 	// 		tagSets = tagSets[rm.stmt.SOffset : rm.stmt.SOffset+rm.stmt.SLimit]
-	// 	// 	}
-	// 	// }
-	//
-	// 	// Create all cursors for reading the data from this shard.
-	// 	for _, t := range tagSets {
-	// 		cursors := []*seriesCursor{}
-	//
-	// 		for i, key := range t.SeriesKeys {
-	// 			c := createCursorForSeries(rm.tx, rm.shard, key)
-	// 			if c == nil {
-	// 				// No data exists for this key.
-	// 				continue
-	// 			}
-	// 			cm := newSeriesCursor(c, t.Filters[i])
-	// 			cm.SeekTo(rm.queryTMin)
-	// 			cursors = append(cursors, cm)
-	// 		}
-	// 		// tsc := newTagSetCursor(m.Name, t.Tags, cursors, rm.shard.FieldCodec(m.Name))
-	// 		//(marcio): replace nil here since we have no FieldCode in messageDB
-	// 		tsc := newTagSetCursor(m.Name, t.Tags, cursors, nil)
-	// 		rm.cursors = append(rm.cursors, tsc)
-	// 	}
-	// 	sort.Sort(tagSetCursors(rm.cursors))
-	// }
+	tx, err := lm.shard.DB().Begin(false)
+	if err != nil {
+		return err
+	}
+	lm.tx = tx
+
+	if lm.selectStmt == nil {
+		return lm.openMeta()
+	}
+
+	// Set all time-related parameters on the mapper.
+	lm.queryTMin, lm.queryTMax = sql.TimeRangeAsEpochNano(lm.selectStmt.Condition)
+
+	whereFields := newStringSet()
+
+	// Create the TagSet cursors for the Mapper.
+	for _, src := range lm.selectStmt.Sources {
+		mm, ok := src.(*sql.Conversation)
+		if !ok {
+			return fmt.Errorf("invalid source type: %#v", src)
+		}
+
+		c := lm.shard.index.Conversation(mm.Name)
+		if c == nil {
+			// This shard have never received data for the measurement. No Mapper
+			// required.
+			return nil
+		}
+
+		wfs := newStringSet()
+		for _, n := range lm.selectStmt.NamesInWhere() {
+			if n == "time" {
+				continue
+			}
+			if c.HasField(n) {
+				wfs.add(n)
+				continue
+			}
+		}
+		whereFields.add(wfs.list()...)
+
+		shardCursor := createCursorForConversation(lm.tx, lm.shard, mm.Name)
+		if shardCursor == nil {
+			// No data exists for this key.
+			continue
+		}
+
+		convCursor := newConversationCursor(shardCursor, nil)
+		convCursor.SeekTo(lm.queryTMin)
+		lm.cursors = append(lm.cursors, convCursor)
+
+		sort.Sort(conversationCursors(lm.cursors))
+	}
+
+	lm.whereFields = whereFields.list()
 
 	return nil
 }
 
-// TagSets returns the list of TagSets for which this mapper has data.
-func (rm *RawMapper) TagSets() []string {
-	return tagSetCursors(rm.cursors).Keys()
-}
-
-// NextChunk returns the next chunk of data. Data comes in the same order as the
-// tags return by TagSets. A chunk never contains data for more than 1 tagset.
-// If there is no more data for any tagset, nil will be returned.
-func (rm *RawMapper) NextChunk() (interface{}, error) {
-	var output *rawMapperOutput
+// NextChunk returns the next chunk of data
+func (lm *LocalMapper) NextChunk() (interface{}, error) {
+	var output *MapperOutput
 	for {
-		if rm.currCursorIndex == len(rm.cursors) {
+		if lm.currCursorIndex == len(lm.cursors) {
 			// All tagset cursors processed. NextChunk'ing complete.
 			return nil, nil
 		}
-		cursor := rm.cursors[rm.currCursorIndex]
+		cursor := lm.cursors[lm.currCursorIndex]
 
-		_, k, v := cursor.Next(rm.queryTMin, rm.queryTMax, rm.selectFields, rm.whereFields)
+		k, v := cursor.Next()
 		if v == nil {
 			// Tagset cursor is empty, move to next one.
-			rm.currCursorIndex++
+			lm.currCursorIndex++
 			if output != nil {
 				// There is data, so return it and continue when next called.
 				return output, nil
@@ -169,43 +171,42 @@ func (rm *RawMapper) NextChunk() (interface{}, error) {
 		}
 
 		if output == nil {
-			output = &rawMapperOutput{
-				Name: cursor.measurement,
-				Tags: cursor.tags,
+			output = &MapperOutput{
+				Name: cursor.conversation,
 			}
 		}
-		value := &rawMapperValue{Time: k, Value: v}
+		value := &mapperValue{Time: k, Value: v}
 		output.Values = append(output.Values, value)
-		if len(output.Values) == rm.chunkSize {
+		if len(output.Values) == lm.chunkSize {
 			return output, nil
 		}
 	}
 }
 
 // Close closes the mapper.
-func (rm *RawMapper) Close() {
-	if rm != nil && rm.tx != nil {
-		_ = rm.tx.Rollback()
+func (lm *LocalMapper) Close() {
+	if lm != nil && lm.tx != nil {
+		_ = lm.tx.Rollback()
 	}
 }
 
-// tagSetCursor is virtual cursor that iterates over mutiple series cursors, as though it were
-// a single series.
-type tagSetCursor struct {
-	measurement string            // Measurement name
-	tags        map[string]string // Tag key-value pairs
-	cursors     []*seriesCursor   // Underlying series cursors.
-	decoder     *FieldCodec       // decoder for the raw data bytes
+// conversationCursor is a cursor that walks a single conversation. It provides lookahead functionality.
+type conversationCursor struct {
+	conversation string       // Measurement name
+	cursor       *shardCursor // BoltDB cursor for a series
+	filter       sql.Expr
+	keyBuffer    int64  // The current timestamp key for the cursor
+	valueBuffer  []byte // The current value for the cursor
 }
 
-// tagSetCursors represents a sortable slice of tagSetCursors.
-type tagSetCursors []*tagSetCursor
+// conversationCursors represents a sortable slice of conversationCursors.
+type conversationCursors []*conversationCursor
 
-func (a tagSetCursors) Len() int           { return len(a) }
-func (a tagSetCursors) Less(i, j int) bool { return a[i].key() < a[j].key() }
-func (a tagSetCursors) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a conversationCursors) Len() int           { return len(a) }
+func (a conversationCursors) Less(i, j int) bool { return a[i].key() < a[j].key() }
+func (a conversationCursors) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
-func (a tagSetCursors) Keys() []string {
+func (a conversationCursors) Keys() []string {
 	keys := []string{}
 	for i := range a {
 		keys = append(keys, a[i].key())
@@ -214,166 +215,54 @@ func (a tagSetCursors) Keys() []string {
 	return keys
 }
 
-// newTagSetCursor returns a tagSetCursor
-func newTagSetCursor(m string, t map[string]string, c []*seriesCursor, d *FieldCodec) *tagSetCursor {
-	return &tagSetCursor{
-		measurement: m,
-		tags:        t,
-		cursors:     c,
-		decoder:     d,
-	}
-}
-
-func (tsc *tagSetCursor) key() string {
-	return formMeasurementTagSetKey(tsc.measurement, tsc.tags)
-}
-
-// Next returns the next matching series-key, timestamp and byte slice for the tagset. Filtering
-// is enforced on the values. If there is no matching value, then a nil result is returned.
-func (tsc *tagSetCursor) Next(tmin, tmax int64, selectFields, whereFields []string) (string, int64, interface{}) {
-	for {
-		// Find the cursor with the lowest timestamp, as that is the one to be read next.
-		minCursor := tsc.nextCursor(tmin, tmax)
-		if minCursor == nil {
-			// No cursor of this tagset has any matching data.
-			return "", 0, nil
-		}
-		timestamp, bytes := minCursor.Next()
-
-		var value interface{}
-		if len(selectFields) > 1 {
-			if fieldsWithNames, err := tsc.decoder.DecodeFieldsWithNames(bytes); err == nil {
-				value = fieldsWithNames
-
-				// if there's a where clause, make sure we don't need to filter this value
-				if minCursor.filter != nil && !matchesWhere(minCursor.filter, fieldsWithNames) {
-					value = nil
-				}
-			}
-		} else {
-			// With only 1 field SELECTed, decoding all fields may be avoidable, which is faster.
-			var err error
-			value, err = tsc.decoder.DecodeByName(selectFields[0], bytes)
-			if err != nil {
-				continue
-			}
-
-			// If there's a WHERE clase, see if we need to filter
-			if minCursor.filter != nil {
-				// See if the WHERE is only on this field or on one or more other fields.
-				// If the latter, we'll have to decode everything
-				if len(whereFields) == 1 && whereFields[0] == selectFields[0] {
-					if !matchesWhere(minCursor.filter, map[string]interface{}{selectFields[0]: value}) {
-						value = nil
-					}
-				} else { // Decode everything
-					fieldsWithNames, err := tsc.decoder.DecodeFieldsWithNames(bytes)
-					if err != nil || !matchesWhere(minCursor.filter, fieldsWithNames) {
-						value = nil
-					}
-				}
-			}
-		}
-
-		// Value didn't match, look for the next one.
-		if value == nil {
-			continue
-		}
-
-		return "", timestamp, value
-	}
-}
-
-// SeekTo seeks each underlying cursor to the specified key.
-func (tsc *tagSetCursor) SeekTo(key int64) {
-	for _, c := range tsc.cursors {
-		c.SeekTo(key)
-	}
-}
-
-// IsEmpty returns whether the tagsetCursor has any more data for the given interval.
-func (tsc *tagSetCursor) IsEmptyForInterval(tmin, tmax int64) bool {
-	for _, c := range tsc.cursors {
-		k, _ := c.Peek()
-		if k != 0 && k >= tmin && k <= tmax {
-			return false
-		}
-	}
-	return true
-}
-
-// nextCursor returns the series cursor with the lowest next timestamp, within in the specified
-// range. If none exists, nil is returned.
-func (tsc *tagSetCursor) nextCursor(tmin, tmax int64) *seriesCursor {
-	var minCursor *seriesCursor
-	var timestamp int64
-	for _, c := range tsc.cursors {
-		timestamp, _ = c.Peek()
-		if timestamp != 0 && ((timestamp == tmin) || (timestamp >= tmin && timestamp < tmax)) {
-			if minCursor == nil {
-				minCursor = c
-			} else {
-				if currMinTimestamp, _ := minCursor.Peek(); timestamp < currMinTimestamp {
-					minCursor = c
-				}
-			}
-		}
-	}
-	return minCursor
-}
-
-// seriesCursor is a cursor that walks a single series. It provides lookahead functionality.
-type seriesCursor struct {
-	cursor      *shardCursor // BoltDB cursor for a series
-	filter      messageql.Expr
-	keyBuffer   int64  // The current timestamp key for the cursor
-	valueBuffer []byte // The current value for the cursor
-}
-
 // newSeriesCursor returns a new instance of a series cursor.
-func newSeriesCursor(b *shardCursor, filter messageql.Expr) *seriesCursor {
-	return &seriesCursor{
+func newConversationCursor(b *shardCursor, filter sql.Expr) *conversationCursor {
+	return &conversationCursor{
 		cursor:    b,
 		filter:    filter,
 		keyBuffer: -1, // Nothing buffered.
 	}
 }
 
+func (cc *conversationCursor) key() string {
+	return cc.conversation
+}
+
 // Peek returns the next timestamp and value, without changing what will be
 // be returned by a call to Next()
-func (mc *seriesCursor) Peek() (key int64, value []byte) {
-	if mc.keyBuffer == -1 {
-		k, v := mc.cursor.Next()
+func (cc *conversationCursor) Peek() (key int64, value []byte) {
+	if cc.keyBuffer == -1 {
+		k, v := cc.cursor.Next()
 		if k == nil {
-			mc.keyBuffer = 0
+			cc.keyBuffer = 0
 		} else {
-			mc.keyBuffer = int64(btou64(k))
-			mc.valueBuffer = v
+			cc.keyBuffer = int64(btou64(k))
+			cc.valueBuffer = v
 		}
 	}
 
-	key, value = mc.keyBuffer, mc.valueBuffer
+	key, value = cc.keyBuffer, cc.valueBuffer
 	return
 }
 
 // SeekTo positions the cursor at the key, such that Next() will return
 // the key and value at key.
-func (mc *seriesCursor) SeekTo(key int64) {
-	k, v := mc.cursor.Seek(u64tob(uint64(key)))
+func (cc *conversationCursor) SeekTo(key int64) {
+	k, v := cc.cursor.Seek(u64tob(uint64(key)))
 	if k == nil {
-		mc.keyBuffer = 0
+		cc.keyBuffer = 0
 	} else {
-		mc.keyBuffer, mc.valueBuffer = int64(btou64(k)), v
+		cc.keyBuffer, cc.valueBuffer = int64(btou64(k)), v
 	}
 }
 
 // Next returns the next timestamp and value from the cursor.
-func (mc *seriesCursor) Next() (key int64, value []byte) {
-	if mc.keyBuffer != -1 {
-		key, value = mc.keyBuffer, mc.valueBuffer
-		mc.keyBuffer, mc.valueBuffer = -1, nil
+func (cc *conversationCursor) Next() (key int64, value []byte) {
+	if cc.keyBuffer != -1 {
+		key, value = cc.keyBuffer, cc.valueBuffer
+		cc.keyBuffer, cc.valueBuffer = -1, nil
 	} else {
-		k, v := mc.cursor.Next()
+		k, v := cc.cursor.Next()
 		if k == nil {
 			key = 0
 		} else {
@@ -383,9 +272,9 @@ func (mc *seriesCursor) Next() (key int64, value []byte) {
 	return
 }
 
-// createCursorForSeries creates a cursor for walking the given series key. The cursor
+// createCursorForConversation creates a cursor for walking the given series key. The cursor
 // consolidates both the Bolt store and any WAL cache.
-func createCursorForSeries(tx *bolt.Tx, shard *Shard, key string) *shardCursor {
+func createCursorForConversation(tx *bolt.Tx, shard *Shard, key string) *shardCursor {
 	// Retrieve key bucket.
 	b := tx.Bucket([]byte(key))
 
@@ -408,66 +297,62 @@ func createCursorForSeries(tx *bolt.Tx, shard *Shard, key string) *shardCursor {
 }
 
 type tagSetsAndFields struct {
-	tagSets      []*messageql.TagSet
+	tagSets      []*sql.TagSet
 	selectFields []string
 	selectTags   []string
 	whereFields  []string
 }
 
-// // createTagSetsAndFields returns the tagsets and various fields given a measurement and
-// // SELECT statement. It also ensures that the fields and tags exist.
-// func createTagSetsAndFields(m *Conversation, stmt *messageql.SelectStatement) (*tagSetsAndFields, error) {
-// 	_, tagKeys, err := stmt.Dimensions.Normalize()
-// 	if err != nil {
-// 		return nil, err
-// 	}
-//
-// 	sfs := newStringSet()
-// 	sts := newStringSet()
-// 	wfs := newStringSet()
-//
-// 	// Validate the fields and tags asked for exist and keep track of which are in the select vs the where
-// 	for _, n := range stmt.NamesInSelect() {
-// 		if m.HasField(n) {
-// 			sfs.add(n)
-// 			continue
-// 		}
-// 		if !m.HasTagKey(n) {
-// 			return nil, fmt.Errorf("unknown field or tag name in select clause: %s", n)
-// 		}
-// 		sts.add(n)
-// 		tagKeys = append(tagKeys, n)
-// 	}
-// 	for _, n := range stmt.NamesInWhere() {
-// 		if n == "time" {
-// 			continue
-// 		}
-// 		if m.HasField(n) {
-// 			wfs.add(n)
-// 			continue
-// 		}
-// 		if !m.HasTagKey(n) {
-// 			return nil, fmt.Errorf("unknown field or tag name in where clause: %s", n)
-// 		}
-// 	}
-//
-// 	// Get the sorted unique tag sets for this statement.
-// 	tagSets, err := m.TagSets(stmt, tagKeys)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-//
-// 	return &tagSetsAndFields{
-// 		tagSets:      tagSets,
-// 		selectFields: sfs.list(),
-// 		selectTags:   sts.list(),
-// 		whereFields:  wfs.list(),
-// 	}, nil
-// }
+// createTagSetsAndFields returns the tagsets and various fields given a measurement and
+// SELECT statement.
+func createTagSetsAndFields(c *Conversation, stmt *sql.SelectStatement) (*tagSetsAndFields, error) {
+	_, tagKeys, err := stmt.Dimensions.Normalize()
+	if err != nil {
+		return nil, err
+	}
+
+	sfs := newStringSet()
+	sts := newStringSet()
+	wfs := newStringSet()
+
+	// Validate the fields and tags asked for exist and keep track of which are in the select vs the where
+	for _, n := range stmt.NamesInSelect() {
+		if c.HasField(n) {
+			sfs.add(n)
+			continue
+		}
+		if c.HasTagKey(n) {
+			sts.add(n)
+			tagKeys = append(tagKeys, n)
+		}
+	}
+	for _, n := range stmt.NamesInWhere() {
+		if n == "time" {
+			continue
+		}
+		if c.HasField(n) {
+			wfs.add(n)
+			continue
+		}
+	}
+
+	// Get the sorted unique tag sets for this statement.
+	// tagSets, err := c.TagSets(stmt, tagKeys)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	return &tagSetsAndFields{
+		// tagSets:      tagSets,
+		selectFields: sfs.list(),
+		selectTags:   sts.list(),
+		whereFields:  wfs.list(),
+	}, nil
+}
 
 // matchesFilter returns true if the value matches the where clause
-func matchesWhere(f messageql.Expr, fields map[string]interface{}) bool {
-	if ok, _ := messageql.Eval(f, fields).(bool); !ok {
+func matchesWhere(f sql.Expr, fields map[string]interface{}) bool {
+	if ok, _ := sql.Eval(f, fields).(bool); !ok {
 		return false
 	}
 	return true

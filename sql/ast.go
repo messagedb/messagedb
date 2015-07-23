@@ -1,10 +1,9 @@
-package messageql
+package sql
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -67,7 +66,7 @@ func (d DataType) String() string {
 	return "unknown"
 }
 
-// Node represents a node in the InfluxDB abstract syntax tree.
+// Node represents a node in the MessageDB abstract syntax tree.
 type Node interface {
 	node()
 	String() string
@@ -92,7 +91,9 @@ func (*DropOrganizationStatement) node() {}
 func (*DropConversationStatement) node() {}
 func (*DropUserStatement) node()         {}
 func (*GrantStatement) node()            {}
+func (*GrantAdminStatement) node()       {}
 func (*RevokeStatement) node()           {}
+func (*RevokeAdminStatement) node()      {}
 func (*SelectStatement) node()           {}
 func (*SetPasswordUserStatement) node()  {}
 
@@ -187,9 +188,15 @@ type SortField struct {
 // String returns a string representation of a sort field
 func (field *SortField) String() string {
 	var buf bytes.Buffer
-	_, _ = buf.WriteString(field.Name)
-	_, _ = buf.WriteString(" ")
-	_, _ = buf.WriteString(strconv.FormatBool(field.Ascending))
+	if field.Name == "" {
+		_, _ = buf.WriteString(field.Name)
+		_, _ = buf.WriteString(" ")
+	}
+	if field.Ascending {
+		_, _ = buf.WriteString("ASC")
+	} else {
+		_, _ = buf.WriteString("DESC")
+	}
 	return buf.String()
 }
 

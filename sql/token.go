@@ -4,19 +4,17 @@ import (
 	"strings"
 )
 
-// Token is a lexical token of the MessageDB SQL language.
+// Token is a lexical token of the InfluxQL language.
 type Token int
 
 const (
 	// Special tokens
-
 	ILLEGAL Token = iota
 	EOF
 	WS
 
-	literalBegining
+	literal_beg
 	// Literals
-
 	IDENT        // main
 	NUMBER       // 12345.67
 	DURATION_VAL // 13h
@@ -27,11 +25,10 @@ const (
 	FALSE        // false
 	REGEX        // Regular expressions
 	BADREGEX     // `.*
-	literalEnd
+	literal_end
 
-	operatorBegining
+	operator_beg
 	// Operators
-
 	ADD // +
 	SUB // -
 	MUL // *
@@ -48,7 +45,7 @@ const (
 	LTE      // <=
 	GT       // >
 	GTE      // >=
-	operatorEnd
+	operator_end
 
 	LPAREN    // (
 	RPAREN    // )
@@ -56,9 +53,8 @@ const (
 	SEMICOLON // ;
 	DOT       // .
 
-	keywordBegining
+	keyword_beg
 	// Keywords
-
 	ALL
 	ALTER
 	AS
@@ -67,14 +63,11 @@ const (
 	BY
 	CREATE
 	CONTINUOUS
-	CONVERSATION
-	CONVERSATIONS
 	DATABASE
 	DATABASES
 	DEFAULT
 	DELETE
 	DESC
-	DEVICES
 	DISTINCT
 	DROP
 	DURATION
@@ -96,13 +89,11 @@ const (
 	KEY
 	KEYS
 	LIMIT
-	MEMBER
-	MEMBERS
+	MEASUREMENT
+	MEASUREMENTS
 	OFFSET
 	ON
 	ORDER
-	ORGANIZATION
-	ORGANIZATIONS
 	PASSWORD
 	POLICY
 	POLICIES
@@ -130,7 +121,7 @@ const (
 	WHERE
 	WITH
 	WRITE
-	keywordEnd
+	keyword_end
 )
 
 var tokens = [...]string{
@@ -171,79 +162,79 @@ var tokens = [...]string{
 	SEMICOLON: ";",
 	DOT:       ".",
 
-	ALL:           "ALL",
-	ALTER:         "ALTER",
-	AS:            "AS",
-	ASC:           "ASC",
-	BEGIN:         "BEGIN",
-	BY:            "BY",
-	CREATE:        "CREATE",
-	CONVERSATION:  "CONVERSATION",
-	CONVERSATIONS: "CONVERSATIONS",
-	DATABASE:      "DATABASE",
-	DATABASES:     "DATABASES",
-	DEFAULT:       "DEFAULT",
-	DELETE:        "DELETE",
-	DESC:          "DESC",
-	DEVICES:       "DEVICES",
-	DROP:          "DROP",
-	DURATION:      "DURATION",
-	END:           "END",
-	EXISTS:        "EXISTS",
-	EXPLAIN:       "EXPLAIN",
-	FIELD:         "FIELD",
-	FOR:           "FOR",
-	FROM:          "FROM",
-	GRANT:         "GRANT",
-	GRANTS:        "GRANTS",
-	GROUP:         "GROUP",
-	IF:            "IF",
-	IN:            "IN",
-	INF:           "INF",
-	INSERT:        "INSERT",
-	INTO:          "INTO",
-	KEY:           "KEY",
-	KEYS:          "KEYS",
-	LIMIT:         "LIMIT",
-	MEMBER:        "MEMBER",
-	MEMBERS:       "MEMBERS",
-	OFFSET:        "OFFSET",
-	ON:            "ON",
-	ORDER:         "ORDER",
-	ORGANIZATION:  "ORGANIZATION",
-	ORGANIZATIONS: "ORGANIZATIONS",
-	PASSWORD:      "PASSWORD",
-	POLICY:        "POLICY",
-	POLICIES:      "POLICIES",
-	PRIVILEGES:    "PRIVILEGES",
-	QUERIES:       "QUERIES",
-	QUERY:         "QUERY",
-	READ:          "READ",
-	REPLICATION:   "REPLICATION",
-	RETENTION:     "RETENTION",
-	REVOKE:        "REVOKE",
-	SELECT:        "SELECT",
-	SERIES:        "SERIES",
-	SERVERS:       "SERVERS",
-	SET:           "SET",
-	SHOW:          "SHOW",
-	STATS:         "STATS",
-	DIAGNOSTICS:   "DIAGNOSTICS",
-	TAG:           "TAG",
-	TO:            "TO",
-	USER:          "USER",
-	USERS:         "USERS",
-	VALUES:        "VALUES",
-	WHERE:         "WHERE",
-	WITH:          "WITH",
-	WRITE:         "WRITE",
+	ALL:          "ALL",
+	ALTER:        "ALTER",
+	AS:           "AS",
+	ASC:          "ASC",
+	BEGIN:        "BEGIN",
+	BY:           "BY",
+	CREATE:       "CREATE",
+	CONTINUOUS:   "CONTINUOUS",
+	DATABASE:     "DATABASE",
+	DATABASES:    "DATABASES",
+	DEFAULT:      "DEFAULT",
+	DELETE:       "DELETE",
+	DESC:         "DESC",
+	DROP:         "DROP",
+	DISTINCT:     "DISTINCT",
+	DURATION:     "DURATION",
+	END:          "END",
+	EXISTS:       "EXISTS",
+	EXPLAIN:      "EXPLAIN",
+	FIELD:        "FIELD",
+	FOR:          "FOR",
+	FROM:         "FROM",
+	GRANT:        "GRANT",
+	GRANTS:       "GRANTS",
+	GROUP:        "GROUP",
+	IF:           "IF",
+	IN:           "IN",
+	INF:          "INF",
+	INNER:        "INNER",
+	INSERT:       "INSERT",
+	INTO:         "INTO",
+	KEY:          "KEY",
+	KEYS:         "KEYS",
+	LIMIT:        "LIMIT",
+	MEASUREMENT:  "MEASUREMENT",
+	MEASUREMENTS: "MEASUREMENTS",
+	OFFSET:       "OFFSET",
+	ON:           "ON",
+	ORDER:        "ORDER",
+	PASSWORD:     "PASSWORD",
+	POLICY:       "POLICY",
+	POLICIES:     "POLICIES",
+	PRIVILEGES:   "PRIVILEGES",
+	QUERIES:      "QUERIES",
+	QUERY:        "QUERY",
+	READ:         "READ",
+	REPLICATION:  "REPLICATION",
+	RETENTION:    "RETENTION",
+	REVOKE:       "REVOKE",
+	SELECT:       "SELECT",
+	SERIES:       "SERIES",
+	SERVERS:      "SERVERS",
+	SET:          "SET",
+	SHOW:         "SHOW",
+	SLIMIT:       "SLIMIT",
+	SOFFSET:      "SOFFSET",
+	STATS:        "STATS",
+	DIAGNOSTICS:  "DIAGNOSTICS",
+	TAG:          "TAG",
+	TO:           "TO",
+	USER:         "USER",
+	USERS:        "USERS",
+	VALUES:       "VALUES",
+	WHERE:        "WHERE",
+	WITH:         "WITH",
+	WRITE:        "WRITE",
 }
 
 var keywords map[string]Token
 
 func init() {
 	keywords = make(map[string]Token)
-	for tok := keywordBegining + 1; tok < keywordEnd; tok++ {
+	for tok := keyword_beg + 1; tok < keyword_end; tok++ {
 		keywords[strings.ToLower(tokens[tok])] = tok
 	}
 	for _, tok := range []Token{AND, OR} {
@@ -279,7 +270,7 @@ func (tok Token) Precedence() int {
 }
 
 // isOperator returns true for operator tokens.
-func (tok Token) isOperator() bool { return tok > operatorBegining && tok < operatorEnd }
+func (tok Token) isOperator() bool { return tok > operator_beg && tok < operator_end }
 
 // tokstr returns a literal if provided, otherwise returns the token string.
 func tokstr(tok Token, lit string) string {

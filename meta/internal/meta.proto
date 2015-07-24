@@ -29,7 +29,7 @@ message DatabaseInfo {
 	required string Name = 1;
 	required string DefaultRetentionPolicy = 2;
 	repeated RetentionPolicyInfo RetentionPolicies = 3;
-	// repeated ContinuousQueryInfo ContinuousQueries = 4;
+	repeated ContinuousQueryInfo ContinuousQueries = 4;
 }
 
 message RetentionPolicyInfo {
@@ -51,6 +51,11 @@ message ShardGroupInfo {
 message ShardInfo {
 	required uint64 ID = 1;
 	repeated uint64 OwnerIDs = 2;
+}
+
+message ContinuousQueryInfo {
+	required string Name = 1;
+	required string Query = 2;
 }
 
 message UserInfo {
@@ -86,34 +91,14 @@ message Command {
 		UpdateRetentionPolicyCommand     = 8;
 		CreateShardGroupCommand          = 9;
 		DeleteShardGroupCommand          = 10;
-
-		SetPrivilegeCommand              = 11;
-		SetDataCommand                   = 12;
-
+		CreateContinuousQueryCommand     = 11;
+		DropContinuousQueryCommand       = 12;
 		CreateUserCommand                = 13;
 		DropUserCommand                  = 14;
 		UpdateUserCommand                = 15;
-
-		CreateOrganizationCommand        = 16;
-		DropOrganizationCommand          = 17;
-		UpdateOrganizationCommand        = 18;
-
-		AddOrUpdateMembershipCommand	 = 19;
-		RemoveMembershipCommand 		 = 20;
-		EditMyMembershipCommand          = 21;
-
-		CreateConversationCommand        = 22;
-		DropConversationCommand          = 23;
-		UpdateConversationCommand        = 24;
-
-		PublicizeMembershipCommand		 = 25;
-		ConcealMembershipCommand		 = 26;
-
-		AddDeviceCommand				 = 27;
-		UpdateDeviceCommand				 = 28;
-		DeleteDeviceCommand				 = 29;
-
-		SetAdminPrivilegeCommand         = 30;
+		SetPrivilegeCommand              = 16;
+		SetDataCommand                   = 17;
+		SetAdminPrivilegeCommand         = 18;
     }
 
     required Type type = 1;
@@ -201,9 +186,26 @@ message DeleteShardGroupCommand {
     required uint64 ShardGroupID = 3;
 }
 
+message CreateContinuousQueryCommand {
+    extend Command {
+        optional CreateContinuousQueryCommand command = 111;
+    }
+    required string Database = 1;
+    required string Name = 2;
+    required string Query = 3;
+}
+
+message DropContinuousQueryCommand {
+    extend Command {
+        optional DropContinuousQueryCommand command = 112;
+    }
+    required string Database = 1;
+    required string Name = 2;
+}
+
 message CreateUserCommand {
     extend Command {
-        optional CreateUserCommand command = 111;
+        optional CreateUserCommand command = 113;
     }
     required string Name = 1;
     required string Hash = 2;
@@ -212,14 +214,14 @@ message CreateUserCommand {
 
 message DropUserCommand {
     extend Command {
-        optional DropUserCommand command = 112;
+        optional DropUserCommand command = 114;
     }
     required string Name = 1;
 }
 
 message UpdateUserCommand {
     extend Command {
-        optional UpdateUserCommand command = 113;
+        optional UpdateUserCommand command = 115;
     }
     required string Name = 1;
     required string Hash = 2;
@@ -227,7 +229,7 @@ message UpdateUserCommand {
 
 message SetPrivilegeCommand {
     extend Command {
-        optional SetPrivilegeCommand command = 114;
+        optional SetPrivilegeCommand command = 116;
     }
     required string Username = 1;
     required string Database = 2;
@@ -236,14 +238,14 @@ message SetPrivilegeCommand {
 
 message SetDataCommand {
     extend Command {
-        optional SetDataCommand command = 115;
+        optional SetDataCommand command = 117;
     }
     required Data Data = 1;
 }
 
 message SetAdminPrivilegeCommand {
     extend Command {
-        optional SetAdminPrivilegeCommand command = 116;
+        optional SetAdminPrivilegeCommand command = 118;
     }
     required string Username = 1;
     required bool Admin = 2;

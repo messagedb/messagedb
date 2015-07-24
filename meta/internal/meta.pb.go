@@ -15,6 +15,7 @@ It has these top-level messages:
 	RetentionPolicyInfo
 	ShardGroupInfo
 	ShardInfo
+	ContinuousQueryInfo
 	UserInfo
 	UserPrivilege
 	Command
@@ -28,6 +29,8 @@ It has these top-level messages:
 	UpdateRetentionPolicyCommand
 	CreateShardGroupCommand
 	DeleteShardGroupCommand
+	CreateContinuousQueryCommand
+	DropContinuousQueryCommand
 	CreateUserCommand
 	DropUserCommand
 	UpdateUserCommand
@@ -58,26 +61,14 @@ const (
 	Command_UpdateRetentionPolicyCommand     Command_Type = 8
 	Command_CreateShardGroupCommand          Command_Type = 9
 	Command_DeleteShardGroupCommand          Command_Type = 10
-	Command_SetPrivilegeCommand              Command_Type = 11
-	Command_SetDataCommand                   Command_Type = 12
+	Command_CreateContinuousQueryCommand     Command_Type = 11
+	Command_DropContinuousQueryCommand       Command_Type = 12
 	Command_CreateUserCommand                Command_Type = 13
 	Command_DropUserCommand                  Command_Type = 14
 	Command_UpdateUserCommand                Command_Type = 15
-	Command_CreateOrganizationCommand        Command_Type = 16
-	Command_DropOrganizationCommand          Command_Type = 17
-	Command_UpdateOrganizationCommand        Command_Type = 18
-	Command_AddOrUpdateMembershipCommand     Command_Type = 19
-	Command_RemoveMembershipCommand          Command_Type = 20
-	Command_EditMyMembershipCommand          Command_Type = 21
-	Command_CreateConversationCommand        Command_Type = 22
-	Command_DropConversationCommand          Command_Type = 23
-	Command_UpdateConversationCommand        Command_Type = 24
-	Command_PublicizeMembershipCommand       Command_Type = 25
-	Command_ConcealMembershipCommand         Command_Type = 26
-	Command_AddDeviceCommand                 Command_Type = 27
-	Command_UpdateDeviceCommand              Command_Type = 28
-	Command_DeleteDeviceCommand              Command_Type = 29
-	Command_SetAdminPrivilegeCommand         Command_Type = 30
+	Command_SetPrivilegeCommand              Command_Type = 16
+	Command_SetDataCommand                   Command_Type = 17
+	Command_SetAdminPrivilegeCommand         Command_Type = 18
 )
 
 var Command_Type_name = map[int32]string{
@@ -91,26 +82,14 @@ var Command_Type_name = map[int32]string{
 	8:  "UpdateRetentionPolicyCommand",
 	9:  "CreateShardGroupCommand",
 	10: "DeleteShardGroupCommand",
-	11: "SetPrivilegeCommand",
-	12: "SetDataCommand",
+	11: "CreateContinuousQueryCommand",
+	12: "DropContinuousQueryCommand",
 	13: "CreateUserCommand",
 	14: "DropUserCommand",
 	15: "UpdateUserCommand",
-	16: "CreateOrganizationCommand",
-	17: "DropOrganizationCommand",
-	18: "UpdateOrganizationCommand",
-	19: "AddOrUpdateMembershipCommand",
-	20: "RemoveMembershipCommand",
-	21: "EditMyMembershipCommand",
-	22: "CreateConversationCommand",
-	23: "DropConversationCommand",
-	24: "UpdateConversationCommand",
-	25: "PublicizeMembershipCommand",
-	26: "ConcealMembershipCommand",
-	27: "AddDeviceCommand",
-	28: "UpdateDeviceCommand",
-	29: "DeleteDeviceCommand",
-	30: "SetAdminPrivilegeCommand",
+	16: "SetPrivilegeCommand",
+	17: "SetDataCommand",
+	18: "SetAdminPrivilegeCommand",
 }
 var Command_Type_value = map[string]int32{
 	"CreateNodeCommand":                1,
@@ -123,26 +102,14 @@ var Command_Type_value = map[string]int32{
 	"UpdateRetentionPolicyCommand":     8,
 	"CreateShardGroupCommand":          9,
 	"DeleteShardGroupCommand":          10,
-	"SetPrivilegeCommand":              11,
-	"SetDataCommand":                   12,
+	"CreateContinuousQueryCommand":     11,
+	"DropContinuousQueryCommand":       12,
 	"CreateUserCommand":                13,
 	"DropUserCommand":                  14,
 	"UpdateUserCommand":                15,
-	"CreateOrganizationCommand":        16,
-	"DropOrganizationCommand":          17,
-	"UpdateOrganizationCommand":        18,
-	"AddOrUpdateMembershipCommand":     19,
-	"RemoveMembershipCommand":          20,
-	"EditMyMembershipCommand":          21,
-	"CreateConversationCommand":        22,
-	"DropConversationCommand":          23,
-	"UpdateConversationCommand":        24,
-	"PublicizeMembershipCommand":       25,
-	"ConcealMembershipCommand":         26,
-	"AddDeviceCommand":                 27,
-	"UpdateDeviceCommand":              28,
-	"DeleteDeviceCommand":              29,
-	"SetAdminPrivilegeCommand":         30,
+	"SetPrivilegeCommand":              16,
+	"SetDataCommand":                   17,
+	"SetAdminPrivilegeCommand":         18,
 }
 
 func (x Command_Type) Enum() *Command_Type {
@@ -270,6 +237,7 @@ type DatabaseInfo struct {
 	Name                   *string                `protobuf:"bytes,1,req" json:"Name,omitempty"`
 	DefaultRetentionPolicy *string                `protobuf:"bytes,2,req" json:"DefaultRetentionPolicy,omitempty"`
 	RetentionPolicies      []*RetentionPolicyInfo `protobuf:"bytes,3,rep" json:"RetentionPolicies,omitempty"`
+	ContinuousQueries      []*ContinuousQueryInfo `protobuf:"bytes,4,rep" json:"ContinuousQueries,omitempty"`
 	XXX_unrecognized       []byte                 `json:"-"`
 }
 
@@ -294,6 +262,13 @@ func (m *DatabaseInfo) GetDefaultRetentionPolicy() string {
 func (m *DatabaseInfo) GetRetentionPolicies() []*RetentionPolicyInfo {
 	if m != nil {
 		return m.RetentionPolicies
+	}
+	return nil
+}
+
+func (m *DatabaseInfo) GetContinuousQueries() []*ContinuousQueryInfo {
+	if m != nil {
+		return m.ContinuousQueries
 	}
 	return nil
 }
@@ -416,6 +391,30 @@ func (m *ShardInfo) GetOwnerIDs() []uint64 {
 		return m.OwnerIDs
 	}
 	return nil
+}
+
+type ContinuousQueryInfo struct {
+	Name             *string `protobuf:"bytes,1,req" json:"Name,omitempty"`
+	Query            *string `protobuf:"bytes,2,req" json:"Query,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *ContinuousQueryInfo) Reset()         { *m = ContinuousQueryInfo{} }
+func (m *ContinuousQueryInfo) String() string { return proto.CompactTextString(m) }
+func (*ContinuousQueryInfo) ProtoMessage()    {}
+
+func (m *ContinuousQueryInfo) GetName() string {
+	if m != nil && m.Name != nil {
+		return *m.Name
+	}
+	return ""
+}
+
+func (m *ContinuousQueryInfo) GetQuery() string {
+	if m != nil && m.Query != nil {
+		return *m.Query
+	}
+	return ""
 }
 
 type UserInfo struct {
@@ -849,6 +848,78 @@ var E_DeleteShardGroupCommand_Command = &proto.ExtensionDesc{
 	Tag:           "bytes,110,opt,name=command",
 }
 
+type CreateContinuousQueryCommand struct {
+	Database         *string `protobuf:"bytes,1,req" json:"Database,omitempty"`
+	Name             *string `protobuf:"bytes,2,req" json:"Name,omitempty"`
+	Query            *string `protobuf:"bytes,3,req" json:"Query,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *CreateContinuousQueryCommand) Reset()         { *m = CreateContinuousQueryCommand{} }
+func (m *CreateContinuousQueryCommand) String() string { return proto.CompactTextString(m) }
+func (*CreateContinuousQueryCommand) ProtoMessage()    {}
+
+func (m *CreateContinuousQueryCommand) GetDatabase() string {
+	if m != nil && m.Database != nil {
+		return *m.Database
+	}
+	return ""
+}
+
+func (m *CreateContinuousQueryCommand) GetName() string {
+	if m != nil && m.Name != nil {
+		return *m.Name
+	}
+	return ""
+}
+
+func (m *CreateContinuousQueryCommand) GetQuery() string {
+	if m != nil && m.Query != nil {
+		return *m.Query
+	}
+	return ""
+}
+
+var E_CreateContinuousQueryCommand_Command = &proto.ExtensionDesc{
+	ExtendedType:  (*Command)(nil),
+	ExtensionType: (*CreateContinuousQueryCommand)(nil),
+	Field:         111,
+	Name:          "internal.CreateContinuousQueryCommand.command",
+	Tag:           "bytes,111,opt,name=command",
+}
+
+type DropContinuousQueryCommand struct {
+	Database         *string `protobuf:"bytes,1,req" json:"Database,omitempty"`
+	Name             *string `protobuf:"bytes,2,req" json:"Name,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *DropContinuousQueryCommand) Reset()         { *m = DropContinuousQueryCommand{} }
+func (m *DropContinuousQueryCommand) String() string { return proto.CompactTextString(m) }
+func (*DropContinuousQueryCommand) ProtoMessage()    {}
+
+func (m *DropContinuousQueryCommand) GetDatabase() string {
+	if m != nil && m.Database != nil {
+		return *m.Database
+	}
+	return ""
+}
+
+func (m *DropContinuousQueryCommand) GetName() string {
+	if m != nil && m.Name != nil {
+		return *m.Name
+	}
+	return ""
+}
+
+var E_DropContinuousQueryCommand_Command = &proto.ExtensionDesc{
+	ExtendedType:  (*Command)(nil),
+	ExtensionType: (*DropContinuousQueryCommand)(nil),
+	Field:         112,
+	Name:          "internal.DropContinuousQueryCommand.command",
+	Tag:           "bytes,112,opt,name=command",
+}
+
 type CreateUserCommand struct {
 	Name             *string `protobuf:"bytes,1,req" json:"Name,omitempty"`
 	Hash             *string `protobuf:"bytes,2,req" json:"Hash,omitempty"`
@@ -884,9 +955,9 @@ func (m *CreateUserCommand) GetAdmin() bool {
 var E_CreateUserCommand_Command = &proto.ExtensionDesc{
 	ExtendedType:  (*Command)(nil),
 	ExtensionType: (*CreateUserCommand)(nil),
-	Field:         111,
+	Field:         113,
 	Name:          "internal.CreateUserCommand.command",
-	Tag:           "bytes,111,opt,name=command",
+	Tag:           "bytes,113,opt,name=command",
 }
 
 type DropUserCommand struct {
@@ -908,9 +979,9 @@ func (m *DropUserCommand) GetName() string {
 var E_DropUserCommand_Command = &proto.ExtensionDesc{
 	ExtendedType:  (*Command)(nil),
 	ExtensionType: (*DropUserCommand)(nil),
-	Field:         112,
+	Field:         114,
 	Name:          "internal.DropUserCommand.command",
-	Tag:           "bytes,112,opt,name=command",
+	Tag:           "bytes,114,opt,name=command",
 }
 
 type UpdateUserCommand struct {
@@ -940,9 +1011,9 @@ func (m *UpdateUserCommand) GetHash() string {
 var E_UpdateUserCommand_Command = &proto.ExtensionDesc{
 	ExtendedType:  (*Command)(nil),
 	ExtensionType: (*UpdateUserCommand)(nil),
-	Field:         113,
+	Field:         115,
 	Name:          "internal.UpdateUserCommand.command",
-	Tag:           "bytes,113,opt,name=command",
+	Tag:           "bytes,115,opt,name=command",
 }
 
 type SetPrivilegeCommand struct {
@@ -980,9 +1051,9 @@ func (m *SetPrivilegeCommand) GetPrivilege() int32 {
 var E_SetPrivilegeCommand_Command = &proto.ExtensionDesc{
 	ExtendedType:  (*Command)(nil),
 	ExtensionType: (*SetPrivilegeCommand)(nil),
-	Field:         114,
+	Field:         116,
 	Name:          "internal.SetPrivilegeCommand.command",
-	Tag:           "bytes,114,opt,name=command",
+	Tag:           "bytes,116,opt,name=command",
 }
 
 type SetDataCommand struct {
@@ -1004,9 +1075,9 @@ func (m *SetDataCommand) GetData() *Data {
 var E_SetDataCommand_Command = &proto.ExtensionDesc{
 	ExtendedType:  (*Command)(nil),
 	ExtensionType: (*SetDataCommand)(nil),
-	Field:         115,
+	Field:         117,
 	Name:          "internal.SetDataCommand.command",
-	Tag:           "bytes,115,opt,name=command",
+	Tag:           "bytes,117,opt,name=command",
 }
 
 type SetAdminPrivilegeCommand struct {
@@ -1036,9 +1107,9 @@ func (m *SetAdminPrivilegeCommand) GetAdmin() bool {
 var E_SetAdminPrivilegeCommand_Command = &proto.ExtensionDesc{
 	ExtendedType:  (*Command)(nil),
 	ExtensionType: (*SetAdminPrivilegeCommand)(nil),
-	Field:         116,
+	Field:         118,
 	Name:          "internal.SetAdminPrivilegeCommand.command",
-	Tag:           "bytes,116,opt,name=command",
+	Tag:           "bytes,118,opt,name=command",
 }
 
 type Response struct {
@@ -1085,6 +1156,8 @@ func init() {
 	proto.RegisterExtension(E_UpdateRetentionPolicyCommand_Command)
 	proto.RegisterExtension(E_CreateShardGroupCommand_Command)
 	proto.RegisterExtension(E_DeleteShardGroupCommand_Command)
+	proto.RegisterExtension(E_CreateContinuousQueryCommand_Command)
+	proto.RegisterExtension(E_DropContinuousQueryCommand_Command)
 	proto.RegisterExtension(E_CreateUserCommand_Command)
 	proto.RegisterExtension(E_DropUserCommand_Command)
 	proto.RegisterExtension(E_UpdateUserCommand_Command)

@@ -1,5 +1,7 @@
 package meta_test
 
+// import "github.com/davecgh/go-spew/spew"
+
 import (
 	"fmt"
 	"reflect"
@@ -7,8 +9,8 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/messagedb/messagedb/sql"
 	"github.com/messagedb/messagedb/meta"
+	"github.com/messagedb/messagedb/sql"
 )
 
 // Ensure a node can be created.
@@ -430,38 +432,38 @@ func TestData_DeleteShardGroup(t *testing.T) {
 }
 
 // Ensure a continuous query can be created.
-// func TestData_CreateContinuousQuery(t *testing.T) {
-// 	var data meta.Data
-// 	if err := data.CreateDatabase("db0"); err != nil {
-// 		t.Fatal(err)
-// 	} else if err := data.CreateContinuousQuery("db0", "cq0", "SELECT count() FROM foo"); err != nil {
-// 		t.Fatal(err)
-// 	} else if !reflect.DeepEqual(data.Databases[0].ContinuousQueries, []meta.ContinuousQueryInfo{
-// 		{Name: "cq0", Query: "SELECT count() FROM foo"},
-// 	}) {
-// 		t.Fatalf("unexpected queries: %#v", data.Databases[0].ContinuousQueries)
-// 	}
-// }
-//
-// // Ensure a continuous query can be removed.
-// func TestData_DropContinuousQuery(t *testing.T) {
-// 	var data meta.Data
-// 	if err := data.CreateDatabase("db0"); err != nil {
-// 		t.Fatal(err)
-// 	} else if err := data.CreateContinuousQuery("db0", "cq0", "SELECT count() FROM foo"); err != nil {
-// 		t.Fatal(err)
-// 	} else if err = data.CreateContinuousQuery("db0", "cq1", "SELECT count() FROM bar"); err != nil {
-// 		t.Fatal(err)
-// 	}
-//
-// 	if err := data.DropContinuousQuery("db0", "cq0"); err != nil {
-// 		t.Fatal(err)
-// 	} else if !reflect.DeepEqual(data.Databases[0].ContinuousQueries, []meta.ContinuousQueryInfo{
-// 		{Name: "cq1", Query: "SELECT count() FROM bar"},
-// 	}) {
-// 		t.Fatalf("unexpected queries: %#v", data.Databases[0].ContinuousQueries)
-// 	}
-// }
+func TestData_CreateContinuousQuery(t *testing.T) {
+	var data meta.Data
+	if err := data.CreateDatabase("db0"); err != nil {
+		t.Fatal(err)
+	} else if err := data.CreateContinuousQuery("db0", "cq0", "SELECT count() FROM foo"); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(data.Databases[0].ContinuousQueries, []meta.ContinuousQueryInfo{
+		{Name: "cq0", Query: "SELECT count() FROM foo"},
+	}) {
+		t.Fatalf("unexpected queries: %#v", data.Databases[0].ContinuousQueries)
+	}
+}
+
+// Ensure a continuous query can be removed.
+func TestData_DropContinuousQuery(t *testing.T) {
+	var data meta.Data
+	if err := data.CreateDatabase("db0"); err != nil {
+		t.Fatal(err)
+	} else if err := data.CreateContinuousQuery("db0", "cq0", "SELECT count() FROM foo"); err != nil {
+		t.Fatal(err)
+	} else if err = data.CreateContinuousQuery("db0", "cq1", "SELECT count() FROM bar"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := data.DropContinuousQuery("db0", "cq0"); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(data.Databases[0].ContinuousQueries, []meta.ContinuousQueryInfo{
+		{Name: "cq1", Query: "SELECT count() FROM bar"},
+	}) {
+		t.Fatalf("unexpected queries: %#v", data.Databases[0].ContinuousQueries)
+	}
+}
 
 // Ensure a user can be created.
 func TestData_CreateUser(t *testing.T) {
@@ -579,9 +581,9 @@ func TestData_Clone(t *testing.T) {
 						},
 					},
 				},
-				// ContinuousQueries: []meta.ContinuousQueryInfo{
-				// 	{Query: "SELECT count() FROM foo"},
-				// },
+				ContinuousQueries: []meta.ContinuousQueryInfo{
+					{Query: "SELECT count() FROM foo"},
+				},
 			},
 		},
 		Users: []meta.UserInfo{
@@ -646,9 +648,9 @@ func TestData_MarshalBinary(t *testing.T) {
 						},
 					},
 				},
-				// ContinuousQueries: []meta.ContinuousQueryInfo{
-				// 	{Query: "SELECT count() FROM foo"},
-				// },
+				ContinuousQueries: []meta.ContinuousQueryInfo{
+					{Query: "SELECT count() FROM foo"},
+				},
 			},
 		},
 		Users: []meta.UserInfo{

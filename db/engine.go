@@ -1,74 +1,123 @@
 package db
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"time"
 
-const (
-	// Return an error if the user is trying to select more than this number of points in a group by statement.
-	// Most likely they specified a group by interval without time boundaries.
-	MaxGroupByPoints = 100000
-
-	// Since time is always selected, the column count when selecting only a single other value will be 2
-	SelectColumnCountWithOneValue = 2
-
-	// IgnoredChunkSize is what gets passed into Mapper.Begin for aggregate queries as they don't chunk points out
-	IgnoredChunkSize = 0
+	"github.com/boltdb/bolt"
 )
 
-// Mapper is the interface all Mapper types must implement.
-type Mapper interface {
+var (
+	// ErrFormatNotFound is returned when no format can be determined from a path.
+	ErrFormatNotFound = errors.New("format not found")
+)
+
+// DefaultEngine is the default engine used by the shard when initializing.
+const DefaultEngine = "v1"
+
+// Engine represents a swappable storage engine for the shard.
+type Engine interface {
 	Open() error
-	NextChunk() (interface{}, error)
-	Close()
+	Close() error
+
+	SetLogOutput(io.Writer)
+	LoadMetadataIndex(index *DatabaseIndex) error
+
+	Begin(writable bool) (Tx, error)
+	WriteMessages(messages []Message) error
+	DeleteConversation(name string) error
+	ConversationCount() (n int, err error)
 }
 
-// StatefulMapper encapsulates a Mapper and some state that the executor needs to
-// track for that mapper.
-type StatefulMapper struct {
-	Mapper
-	bufferedChunk *MapperOutput // Last read chunk.
-	drained       bool
+// NewEngineFunc creates a new engine.
+type NewEngineFunc func(path string, options EngineOptions) Engine
+
+// newEngineFuncs is a lookup of engine constructors by name.
+var newEngineFuncs = make(map[string]NewEngineFunc)
+
+// RegisterEngine registers a storage engine initializer by name.
+func RegisterEngine(name string, fn NewEngineFunc) {
+	if _, ok := newEngineFuncs[name]; ok {
+		panic("engine already registered: " + name)
+	}
+	newEngineFuncs[name] = fn
 }
 
-// NextChunk wraps a RawMapper and some state.
-func (sm *StatefulMapper) NextChunk() (*MapperOutput, error) {
-	c, err := sm.Mapper.NextChunk()
-	if err != nil {
+// NewEngine returns an instance of an engine based on its format.
+// If the path does not exist then the DefaultFormat is used.
+func NewEngine(path string, options EngineOptions) (Engine, error) {
+	// Create a new engine
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return newEngineFuncs[DefaultEngine](path, options), nil
+	}
+
+	// Only bolt-based backends are currently supported so open it and check the format.
+	var format string
+	if err := func() error {
+		db, err := bolt.Open(path, 0666, &bolt.Options{Timeout: 1 * time.Second})
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+
+		return db.View(func(tx *bolt.Tx) error {
+			// Retrieve the meta bucket.
+			b := tx.Bucket([]byte("meta"))
+
+			// If no format is specified then it must be an original v1 database.
+			if b == nil {
+				format = "v1"
+				return nil
+			}
+
+			// Save the format.
+			format = string(b.Get([]byte("format")))
+			return nil
+		})
+	}(); err != nil {
 		return nil, err
 	}
-	chunk, ok := c.(*MapperOutput)
-	if !ok {
-		if chunk == interface{}(nil) {
-			return nil, nil
-		}
+
+	// Lookup engine by format.
+	fn := newEngineFuncs[format]
+	if fn == nil {
+		return nil, fmt.Errorf("invalid engine format: %q", format)
 	}
-	return chunk, nil
+
+	return fn(path, options), nil
 }
 
-// resultsEmpty will return true if the all the result values are empty or contain only nulls
-func resultsEmpty(resultValues [][]interface{}) bool {
-	for _, vals := range resultValues {
-		// start the loop at 1 because we want to skip over the time value
-		for i := 1; i < len(vals); i++ {
-			if vals[i] != nil {
-				return false
-			}
-		}
-	}
-	return true
+// EngineOptions represents the options used to initialize the engine.
+type EngineOptions struct {
+	MaxWALSize             int
+	WALFlushInterval       time.Duration
+	WALPartitionFlushDelay time.Duration
 }
 
-func int64toFloat64(v interface{}) float64 {
-	switch v.(type) {
-	case int64:
-		return float64(v.(int64))
-	case float64:
-		return v.(float64)
+// NewEngineOptions returns the default options.
+func NewEngineOptions() EngineOptions {
+	return EngineOptions{
+		MaxWALSize:             DefaultMaxWALSize,
+		WALFlushInterval:       DefaultWALFlushInterval,
+		WALPartitionFlushDelay: DefaultWALPartitionFlushDelay,
 	}
-	panic(fmt.Sprintf("expected either int64 or float64, got %v", v))
 }
 
-type int64arr []int64
+// Tx represents a transaction.
+type Tx interface {
+	io.WriterTo
 
-func (a int64arr) Len() int           { return len(a) }
-func (a int64arr) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a int64arr) Less(i, j int) bool { return a[i] < a[j] }
+	Cursor(series string) Cursor
+	Size() int64
+	Commit() error
+	Rollback() error
+}
+
+// Cursor represents an iterator over a series.
+type Cursor interface {
+	Seek(seek []byte) (key, value []byte)
+	Next() (key, value []byte)
+}

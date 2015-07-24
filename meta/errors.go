@@ -13,7 +13,7 @@ var (
 	ErrStoreClosed = errors.New("raft store already closed")
 
 	// ErrTooManyPeers is returned when more than 3 peers are used.
-	ErrTooManyPeers = errors.New("too many peers; messagedb v0.1.0 is limited to 3 nodes in a cluster")
+	ErrTooManyPeers = errors.New("too many peers; influxdb v0.9.0 is limited to 3 nodes in a cluster")
 )
 
 var (
@@ -55,7 +55,8 @@ var (
 
 	// ErrRetentionPolicyDurationTooLow is returned when updating a retention
 	// policy that has a duration lower than the allowed minimum.
-	ErrRetentionPolicyDurationTooLow = fmt.Errorf("retention policy duration must be at least %s", RetentionPolicyMinDuration)
+	ErrRetentionPolicyDurationTooLow = errors.New(fmt.Sprintf("retention policy duration must be at least %s",
+		RetentionPolicyMinDuration))
 
 	// ErrReplicationFactorMismatch is returned when the replication factor
 	// does not match the number of nodes in the cluster. This is a temporary

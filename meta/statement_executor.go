@@ -6,7 +6,7 @@ import (
 	"github.com/messagedb/messagedb/sql"
 )
 
-// StatementExecutor translates InfluxQL queries to meta store methods.
+// StatementExecutor translates sql queries to meta store methods.
 type StatementExecutor struct {
 	Store interface {
 		Nodes() ([]NodeInfo, error)
@@ -31,8 +31,8 @@ type StatementExecutor struct {
 		UserPrivileges(username string) (map[string]sql.Privilege, error)
 		UserPrivilege(username, database string) (*sql.Privilege, error)
 
-		// CreateContinuousQuery(database, name, query string) error
-		// DropContinuousQuery(database, name string) error
+		CreateContinuousQuery(database, name, query string) error
+		DropContinuousQuery(database, name string) error
 	}
 }
 
@@ -73,6 +73,12 @@ func (e *StatementExecutor) ExecuteStatement(stmt sql.Statement) *sql.Result {
 		return e.executeDropRetentionPolicyStatement(stmt)
 	case *sql.ShowRetentionPoliciesStatement:
 		return e.executeShowRetentionPoliciesStatement(stmt)
+	case *sql.CreateContinuousQueryStatement:
+		return e.executeCreateContinuousQueryStatement(stmt)
+	case *sql.DropContinuousQueryStatement:
+		return e.executeDropContinuousQueryStatement(stmt)
+	case *sql.ShowContinuousQueriesStatement:
+		return e.executeShowContinuousQueriesStatement(stmt)
 	case *sql.ShowStatsStatement:
 		return e.executeShowStatsStatement(stmt)
 	default:
@@ -99,7 +105,7 @@ func (e *StatementExecutor) executeShowDatabasesStatement(q *sql.ShowDatabasesSt
 	for _, di := range dis {
 		row.Values = append(row.Values, []interface{}{di.Name})
 	}
-	return &sql.Result{Rows: []*sql.Row{row}}
+	return &sql.Result{Series: []*sql.Row{row}}
 }
 
 func (e *StatementExecutor) executeShowGrantsForUserStatement(q *sql.ShowGrantsForUserStatement) *sql.Result {
@@ -112,7 +118,7 @@ func (e *StatementExecutor) executeShowGrantsForUserStatement(q *sql.ShowGrantsF
 	for d, p := range priv {
 		row.Values = append(row.Values, []interface{}{d, p.String()})
 	}
-	return &sql.Result{Rows: []*sql.Row{row}}
+	return &sql.Result{Series: []*sql.Row{row}}
 }
 
 func (e *StatementExecutor) executeShowServersStatement(q *sql.ShowServersStatement) *sql.Result {
@@ -125,7 +131,7 @@ func (e *StatementExecutor) executeShowServersStatement(q *sql.ShowServersStatem
 	for _, ni := range nis {
 		row.Values = append(row.Values, []interface{}{ni.ID, "http://" + ni.Host})
 	}
-	return &sql.Result{Rows: []*sql.Row{row}}
+	return &sql.Result{Series: []*sql.Row{row}}
 }
 
 func (e *StatementExecutor) executeCreateUserStatement(q *sql.CreateUserStatement) *sql.Result {
@@ -151,7 +157,7 @@ func (e *StatementExecutor) executeShowUsersStatement(q *sql.ShowUsersStatement)
 	for _, ui := range uis {
 		row.Values = append(row.Values, []interface{}{ui.Name, ui.Admin})
 	}
-	return &sql.Result{Rows: []*sql.Row{row}}
+	return &sql.Result{Series: []*sql.Row{row}}
 }
 
 func (e *StatementExecutor) executeGrantStatement(stmt *sql.GrantStatement) *sql.Result {
@@ -237,7 +243,36 @@ func (e *StatementExecutor) executeShowRetentionPoliciesStatement(q *sql.ShowRet
 	for _, rpi := range di.RetentionPolicies {
 		row.Values = append(row.Values, []interface{}{rpi.Name, rpi.Duration.String(), rpi.ReplicaN, di.DefaultRetentionPolicy == rpi.Name})
 	}
-	return &sql.Result{Rows: []*sql.Row{row}}
+	return &sql.Result{Series: []*sql.Row{row}}
+}
+
+func (e *StatementExecutor) executeCreateContinuousQueryStatement(q *sql.CreateContinuousQueryStatement) *sql.Result {
+	return &sql.Result{
+		Err: e.Store.CreateContinuousQuery(q.Database, q.Name, q.String()),
+	}
+}
+
+func (e *StatementExecutor) executeDropContinuousQueryStatement(q *sql.DropContinuousQueryStatement) *sql.Result {
+	return &sql.Result{
+		Err: e.Store.DropContinuousQuery(q.Database, q.Name),
+	}
+}
+
+func (e *StatementExecutor) executeShowContinuousQueriesStatement(stmt *sql.ShowContinuousQueriesStatement) *sql.Result {
+	dis, err := e.Store.Databases()
+	if err != nil {
+		return &sql.Result{Err: err}
+	}
+
+	rows := []*sql.Row{}
+	for _, di := range dis {
+		row := &sql.Row{Columns: []string{"name", "query"}, Name: di.Name}
+		for _, cqi := range di.ContinuousQueries {
+			row.Values = append(row.Values, []interface{}{cqi.Name, cqi.Query})
+		}
+		rows = append(rows, row)
+	}
+	return &sql.Result{Series: rows}
 }
 
 func (e *StatementExecutor) executeShowStatsStatement(stmt *sql.ShowStatsStatement) *sql.Result {

@@ -19,12 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/messagedb/messagedb/meta/internal"
-	"github.com/messagedb/messagedb/sql"
-
 	"github.com/gogo/protobuf/proto"
 	"github.com/hashicorp/raft"
 	"github.com/hashicorp/raft-boltdb"
+	"github.com/messagedb/messagedb/meta/internal"
+	"github.com/messagedb/messagedb/sql"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -55,34 +54,6 @@ const (
 	raftTransportMaxPool  = 3
 	raftTransportTimeout  = 10 * time.Second
 )
-
-type MetaStore interface {
-	Database(name string) (di *DatabaseInfo, err error)
-	Databases() (dis []DatabaseInfo, err error)
-	CreateDatabase(name string) (*DatabaseInfo, error)
-	CreateDatabaseIfNotExists(name string)
-	DropDatabase(name string) error
-
-	RetentionPolicy(database, name string) (rpi *RetentionPolicyInfo, err error)
-	DefaultRetentionPolicy(database string) (rpi *RetentionPolicyInfo, err error)
-	RetentionPolicies(database string) (a []RetentionPolicyInfo, err error)
-	CreateRetentionPolicy(database string, rpi *RetentionPolicyInfo) (*RetentionPolicyInfo, error)
-	CreateRetentionPolicyIfNotExists(database string, rpi *RetentionPolicyInfo) (*RetentionPolicyInfo, error)
-	SetDefaultRetentionPolicy(database, name string) error
-	UpdateRetentionPolicy(database, name string, rpu *RetentionPolicyUpdate) error
-	DropRetentionPolicy(database, name string) error
-
-	Authenticate(username, password string) (ui *UserInfo, err error)
-	User(name string) (ui *UserInfo, err error)
-	Users() (a []UserInfo, err error)
-	UserCount() (count int, err error)
-	AdminUserExists() (exists bool, err error)
-	CreateUser(name, password string, admin bool) (*UserInfo, error)
-	DropUser(name string) error
-	UpdateUser(name, password string) error
-	SetPrivilege(username, database string, p sql.Privilege) error
-	UserPrivileges(username string) (p map[string]sql.Privilege, err error)
-}
 
 // Store represents a raft-backed metastore.
 type Store struct {
@@ -859,6 +830,8 @@ func (s *Store) DropRetentionPolicy(database, name string) error {
 	)
 }
 
+// FIX: CreateRetentionPolicyIfNotExists(database string, rp *RetentionPolicyInfo) (*RetentionPolicyInfo, error)
+
 // CreateShardGroup creates a new shard group in a retention policy for a given time.
 func (s *Store) CreateShardGroup(database, policy string, timestamp time.Time) (*ShardGroupInfo, error) {
 	if err := s.exec(internal.Command_CreateShardGroupCommand, internal.E_CreateShardGroupCommand_Command,
@@ -979,6 +952,27 @@ func (s *Store) ShardOwner(shardID uint64) (database, policy string, sgi *ShardG
 		return errInvalidate
 	})
 	return
+}
+
+// CreateContinuousQuery creates a new continuous query on the store.
+func (s *Store) CreateContinuousQuery(database, name, query string) error {
+	return s.exec(internal.Command_CreateContinuousQueryCommand, internal.E_CreateContinuousQueryCommand_Command,
+		&internal.CreateContinuousQueryCommand{
+			Database: proto.String(database),
+			Name:     proto.String(name),
+			Query:    proto.String(query),
+		},
+	)
+}
+
+// DropContinuousQuery removes a continuous query from the store.
+func (s *Store) DropContinuousQuery(database, name string) error {
+	return s.exec(internal.Command_DropContinuousQueryCommand, internal.E_DropContinuousQueryCommand_Command,
+		&internal.DropContinuousQueryCommand{
+			Database: proto.String(database),
+			Name:     proto.String(name),
+		},
+	)
 }
 
 // User returns a user by name.
@@ -1176,6 +1170,45 @@ func (s *Store) UserCount() (count int, err error) {
 		return nil
 	})
 	return
+}
+
+// PrecreateShardGroups creates shard groups whose endtime is before the cutoff time passed in. This
+// avoid the need for these shards to be created when data for the corresponding time range arrives.
+// Shard creation involves Raft consensus, and precreation avoids taking the hit at write-time.
+func (s *Store) PrecreateShardGroups(cutoff time.Time) error {
+	s.read(func(data *Data) error {
+		for _, di := range data.Databases {
+			for _, rp := range di.RetentionPolicies {
+				for _, g := range rp.ShardGroups {
+					// Check to see if it is not deleted and going to end before our interval
+					if !g.Deleted() && g.EndTime.Before(cutoff) {
+						nextShardGroupTime := g.EndTime.Add(1 * time.Nanosecond)
+
+						// Check if successive shard group exists.
+						if sgi, err := s.ShardGroupByTimestamp(di.Name, rp.Name, nextShardGroupTime); err != nil {
+							s.Logger.Printf("failed to check if successive shard group for group exists %d: %s",
+								g.ID, err.Error())
+							continue
+						} else if sgi != nil && !sgi.Deleted() {
+							continue
+						}
+
+						// It doesn't. Create it.
+						if newGroup, err := s.CreateShardGroupIfNotExists(di.Name, rp.Name, nextShardGroupTime); err != nil {
+							s.Logger.Printf("failed to create successive shard group for group %d: %s",
+								g.ID, err.Error())
+						} else {
+							s.Logger.Printf("new shard group %d successfully created for database %s, retention policy %s",
+								newGroup.ID, di.Name, rp.Name)
+						}
+					}
+				}
+
+			}
+		}
+		return nil
+	})
+	return nil
 }
 
 // SetData force overwrites the root data.
@@ -1415,10 +1448,10 @@ func (fsm *storeFSM) Apply(l *raft.Log) interface{} {
 			return fsm.applyCreateShardGroupCommand(&cmd)
 		case internal.Command_DeleteShardGroupCommand:
 			return fsm.applyDeleteShardGroupCommand(&cmd)
-		// case internal.Command_CreateContinuousQueryCommand:
-		// 	return fsm.applyCreateContinuousQueryCommand(&cmd)
-		// case internal.Command_DropContinuousQueryCommand:
-		// 	return fsm.applyDropContinuousQueryCommand(&cmd)
+		case internal.Command_CreateContinuousQueryCommand:
+			return fsm.applyCreateContinuousQueryCommand(&cmd)
+		case internal.Command_DropContinuousQueryCommand:
+			return fsm.applyDropContinuousQueryCommand(&cmd)
 		case internal.Command_CreateUserCommand:
 			return fsm.applyCreateUserCommand(&cmd)
 		case internal.Command_DropUserCommand:
@@ -1606,33 +1639,33 @@ func (fsm *storeFSM) applyDeleteShardGroupCommand(cmd *internal.Command) interfa
 	return nil
 }
 
-// func (fsm *storeFSM) applyCreateContinuousQueryCommand(cmd *internal.Command) interface{} {
-// 	ext, _ := proto.GetExtension(cmd, internal.E_CreateContinuousQueryCommand_Command)
-// 	v := ext.(*internal.CreateContinuousQueryCommand)
-//
-// 	// Copy data and update.
-// 	other := fsm.data.Clone()
-// 	if err := other.CreateContinuousQuery(v.GetDatabase(), v.GetName(), v.GetQuery()); err != nil {
-// 		return err
-// 	}
-// 	fsm.data = other
-//
-// 	return nil
-// }
-//
-// func (fsm *storeFSM) applyDropContinuousQueryCommand(cmd *internal.Command) interface{} {
-// 	ext, _ := proto.GetExtension(cmd, internal.E_DropContinuousQueryCommand_Command)
-// 	v := ext.(*internal.DropContinuousQueryCommand)
-//
-// 	// Copy data and update.
-// 	other := fsm.data.Clone()
-// 	if err := other.DropContinuousQuery(v.GetDatabase(), v.GetName()); err != nil {
-// 		return err
-// 	}
-// 	fsm.data = other
-//
-// 	return nil
-// }
+func (fsm *storeFSM) applyCreateContinuousQueryCommand(cmd *internal.Command) interface{} {
+	ext, _ := proto.GetExtension(cmd, internal.E_CreateContinuousQueryCommand_Command)
+	v := ext.(*internal.CreateContinuousQueryCommand)
+
+	// Copy data and update.
+	other := fsm.data.Clone()
+	if err := other.CreateContinuousQuery(v.GetDatabase(), v.GetName(), v.GetQuery()); err != nil {
+		return err
+	}
+	fsm.data = other
+
+	return nil
+}
+
+func (fsm *storeFSM) applyDropContinuousQueryCommand(cmd *internal.Command) interface{} {
+	ext, _ := proto.GetExtension(cmd, internal.E_DropContinuousQueryCommand_Command)
+	v := ext.(*internal.DropContinuousQueryCommand)
+
+	// Copy data and update.
+	other := fsm.data.Clone()
+	if err := other.DropContinuousQuery(v.GetDatabase(), v.GetName()); err != nil {
+		return err
+	}
+	fsm.data = other
+
+	return nil
+}
 
 func (fsm *storeFSM) applyCreateUserCommand(cmd *internal.Command) interface{} {
 	ext, _ := proto.GetExtension(cmd, internal.E_CreateUserCommand_Command)
